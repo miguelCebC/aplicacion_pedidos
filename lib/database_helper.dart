@@ -702,20 +702,34 @@ class DatabaseHelper {
 
   // ========== AGENDA ==========
 
-  Future<void> insertarAgendasLote(List<Map<String, dynamic>> agendas) async {
-    final db = await database;
-    final batch = db.batch();
+Future<void> insertarAgendasLote(List<Map<String, dynamic>> agendas) async {
+  final db = await database;
+  final batch = db.batch();
 
-    for (var agenda in agendas) {
-      batch.insert(
-        'agenda',
-        agenda,
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+  for (var agenda in agendas) {
+    // Validar que la fecha sea correcta antes de insertar
+    if (agenda['fecha_inicio'] != null) {
+      try {
+        final fecha = DateTime.parse(agenda['fecha_inicio'].toString());
+        if (fecha.year < 2000) {
+          print('⚠️ Fecha inválida detectada: ${agenda['fecha_inicio']}, omitiendo visita ${agenda['id']}');
+          continue; // Saltar esta visita
+        }
+      } catch (e) {
+        print('⚠️ Error al parsear fecha: ${agenda['fecha_inicio']}, omitiendo visita ${agenda['id']}');
+        continue;
+      }
     }
-
-    await batch.commit(noResult: true);
+    
+    batch.insert(
+      'agenda',
+      agenda,
+      conflictAlgorithm: ConflictAlgorithm.ignore, // ← Cambiar de replace a ignore
+    );
   }
+
+  await batch.commit(noResult: true);
+}
 
   Future<List<Map<String, dynamic>>> obtenerAgenda([int? comercialId]) async {
     final db = await database;

@@ -34,9 +34,10 @@ class _VelneoAppState extends State<VelneoApp> {
       final prefs = await SharedPreferences.getInstance();
       String? url = prefs.getString('velneo_url');
       String? apiKey = prefs.getString('velneo_api_key');
-      final comercialId = prefs.getInt('comercial_id'); // ← AÑADIR ESTA LÍNEA
+      final comercialId = prefs.getInt('comercial_id');
+      
       // Si no hay configuración, no sincronizar
-      if (url == null || apiKey == null || url.isEmpty || apiKey.isEmpty) {
+      if (url == null || apiKey == null || url.isEmpty || apiKey.isEmpty) { // ← LÍNEA 39 CORREGIDA
         print('⚠️ No hay configuración de API, omitiendo sincronización');
         return;
       }
@@ -56,11 +57,11 @@ class _VelneoAppState extends State<VelneoApp> {
       }
 
       // Asegurar protocolo en URL
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      if (!url.startsWith('http://') && !url.startsWith('https://')) { // ← LÍNEA 59 CORREGIDA (ya no puede ser null)
         url = 'https://$url';
       }
 
-      final apiService = VelneoAPIService(url, apiKey);
+      final apiService = VelneoAPIService(url, apiKey); // ← LÍNEA 63 CORREGIDA (ya no pueden ser null)
       final db = DatabaseHelper.instance;
 
       print('📥 Descargando artículos...');
@@ -160,10 +161,10 @@ class _VelneoAppState extends State<VelneoApp> {
         await db.insertarAgendasLote(agendasLista.cast<Map<String, dynamic>>());
         print('   📅 ${agendasLista.length} eventos de agenda');
       }
+      
       // Guardar timestamp de sincronización
       await prefs.setInt('ultima_sincronizacion', ahora);
-      // Guardar timestamp de sincronización
-      await prefs.setInt('ultima_sincronizacion', ahora);
+      
       print('✅ Sincronización automática completada');
       print('   📦 ${articulosLista.length} artículos');
       print('   👥 ${clientesLista.length} clientes');
@@ -173,7 +174,6 @@ class _VelneoAppState extends State<VelneoApp> {
       // No mostrar error al usuario, es en segundo plano
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(

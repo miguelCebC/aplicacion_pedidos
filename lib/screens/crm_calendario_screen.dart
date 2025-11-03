@@ -145,21 +145,33 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
         url = 'https://$url';
       }
 
-      print(
-        '🔄 Sincronizando agenda del comercial $_comercialId desde Velneo...',
-      );
+      print('🔄 Sincronizando agenda del comercial $_comercialId desde Velneo...');
 
-      final apiService = VelneoAPIService(url, apiKey);
-      final db = DatabaseHelper.instance;
+final apiService = VelneoAPIService(url, apiKey);
+final db = DatabaseHelper.instance;
 
-      // Limpiar y recargar agenda del comercial
-      await db.limpiarAgenda();
-      final visitasComercial = await apiService.obtenerAgenda(_comercialId);
-      await db.insertarAgendasLote(
-        visitasComercial.cast<Map<String, dynamic>>(),
-      );
+// Limpiar y recargar agenda del comercial
+await db.limpiarAgenda();
+final visitasComercial = await apiService.obtenerAgenda(_comercialId);
 
-      print('✅ Agenda sincronizada: ${visitasComercial.length} visitas');
+// Validar fechas antes de insertar
+final visitasValidas = visitasComercial.where((visita) {
+  if (visita['fecha_inicio'] != null) {
+    try {
+      final fecha = DateTime.parse(visita['fecha_inicio'].toString());
+      return fecha.year >= 2000; // Solo visitas con año válido
+    } catch (e) {
+      return false;
+    }
+  }
+  return false;
+}).toList();
+
+await db.insertarAgendasLote(
+  visitasValidas.cast<Map<String, dynamic>>(),
+);
+
+print('✅ Agenda sincronizada: ${visitasValidas.length} visitas válidas de ${visitasComercial.length} totales');
 
       setState(() => _sincronizando = false);
       await _cargarEventos();

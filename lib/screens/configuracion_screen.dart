@@ -50,7 +50,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       _urlController.text =
           prefs.getString('velneo_url') ??
           'tecerp.nunsys.com:4311/TORRAL/TecERPv7_dat_dat/v1';
-      _apiKeyController.text = prefs.getString('velneo_api_key') ?? '1234';
+      _apiKeyController.text = prefs.getString('velneo_api_key') ?? '123456';
       _comercialSeleccionadoId = prefs.getInt('comercial_id');
       _comercialSeleccionadoNombre =
           prefs.getString('comercial_nombre') ?? 'Sin asignar';

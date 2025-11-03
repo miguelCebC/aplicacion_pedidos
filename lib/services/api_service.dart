@@ -431,60 +431,68 @@ class VelneoAPIService {
                 break;
               }
 
-              final agendas = agendasList
-                  .where((agenda) {
-                    return agenda['fch_ini'] != null &&
-                        agenda['fch_ini'].toString().isNotEmpty;
-                  })
-                  .map((agenda) {
-                    String? limpiarFecha(dynamic fecha) {
-                      if (fecha == null) return null;
-                      final fechaStr = fecha.toString();
-                      if (fechaStr.isEmpty) return null;
+             final agendas = agendasList
+    .where((agenda) {
+      return agenda['fch_ini'] != null &&
+          agenda['fch_ini'].toString().isNotEmpty;
+    })
+    .map((agenda) {
+      String? limpiarFecha(dynamic fecha) {
+        if (fecha == null) return null;
+        final fechaStr = fecha.toString();
+        if (fechaStr.isEmpty) return null;
 
-                      try {
-                        DateTime.parse(fechaStr);
-                        return fechaStr;
-                      } catch (e) {
-                        return null;
-                      }
-                    }
+        try {
+          final dt = DateTime.parse(fechaStr);
+          // Validar que la fecha sea razonable
+          if (dt.year < 1900 || dt.year > 2100) {
+            DebugLogger.log('⚠️ Fecha fuera de rango: $fechaStr (año ${dt.year})');
+            return null;
+          }
+          return fechaStr;
+        } catch (e) {
+          DebugLogger.log('⚠️ Error parseando fecha: $fechaStr - $e');
+          return null;
+        }
+      }
 
-                    return {
-                      'id': agenda['id'],
-                      'nombre': agenda['name']?.toString() ?? '',
-                      'cliente_id': agenda['cli'] ?? 0,
-                      'tipo_visita': agenda['tip_vis'] ?? 0,
-                      'asunto': agenda['asu']?.toString() ?? '',
-                      'comercial_id': agenda['com'] ?? 0,
-                      'campana_id': agenda['crm_cam_com'] ?? 0,
-                      'fecha_inicio':
-                          limpiarFecha(agenda['fch_ini']) ??
-                          DateTime.now().toIso8601String(),
-                      'hora_inicio': limpiarFecha(agenda['hor_ini']),
-                      'fecha_fin': limpiarFecha(agenda['fch_fin']),
-                      'hora_fin': limpiarFecha(agenda['hor_fin']),
-                      'fecha_proxima_visita': limpiarFecha(
-                        agenda['fch_pro_vis'],
-                      ),
-                      'hora_proxima_visita': limpiarFecha(
-                        agenda['hor_pro_vis'],
-                      ),
-                      'descripcion': agenda['dsc']?.toString() ?? '',
-                      'todo_dia': (agenda['tod_dia'] == true) ? 1 : 0,
-                      'lead_id': agenda['crm_lea'] ?? 0,
-                      'presupuesto_id': agenda['vta_pre_g'] ?? 0,
-                      'generado': (agenda['gen'] == true) ? 1 : 0,
-                      'sincronizado': 1,
-                    };
-                  })
-                  .toList();
+      return {
+        'id': agenda['id'],
+        'nombre': agenda['name']?.toString() ?? '',
+        'cliente_id': agenda['cli'] ?? 0,
+        'tipo_visita': agenda['tip_vis'] ?? 0,
+        'asunto': agenda['asu']?.toString() ?? '',
+        'comercial_id': agenda['com'] ?? 0,
+        'campana_id': agenda['crm_cam_com'] ?? 0,
+        'fecha_inicio': limpiarFecha(agenda['fch_ini']) ?? DateTime.now().toIso8601String(),
+        'hora_inicio': limpiarFecha(agenda['hor_ini']),
+        'fecha_fin': limpiarFecha(agenda['fch_fin']),
+        'hora_fin': limpiarFecha(agenda['hor_fin']),
+        'fecha_proxima_visita': limpiarFecha(agenda['fch_pro_vis']),
+        'hora_proxima_visita': limpiarFecha(agenda['hor_pro_vis']),
+        'descripcion': agenda['dsc']?.toString() ?? '',
+        'todo_dia': (agenda['tod_dia'] == true) ? 1 : 0,
+        'lead_id': agenda['crm_lea'] ?? 0,
+        'presupuesto_id': agenda['vta_pre_g'] ?? 0,
+        'generado': (agenda['gen'] == true) ? 1 : 0,
+        'sincronizado': 1,
+      };
+    })
+    .toList();
 
-              allAgendas.addAll(agendas);
-              DebugLogger.log(
-                '  ✅ Página $page: ${agendas.length} registros válidos (Total acumulado: ${allAgendas.length}/$totalCount)',
-              );
-
+// AÑADIR FILTRO MANUAL AQUÍ ↓↓↓
+// Si se especificó comercialId, filtrar manualmente
+if (comercialId != null) {
+  final agendasFiltradas = agendas.where((agenda) {
+    return agenda['comercial_id'] == comercialId;
+  }).toList();
+  
+  DebugLogger.log('  🔍 Filtradas: ${agendasFiltradas.length} visitas del comercial $comercialId de ${agendas.length} totales');
+  allAgendas.addAll(agendasFiltradas);
+} else {
+  allAgendas.addAll(agendas);
+}
+            
               // Si esta página tiene menos de pageSize, es la última
               if (agendasList.length < pageSize) {
                 DebugLogger.log(

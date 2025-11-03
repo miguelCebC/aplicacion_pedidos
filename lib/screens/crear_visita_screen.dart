@@ -4,6 +4,8 @@ import '../database_helper.dart';
 import '../services/api_service.dart';
 import '../widgets/buscar_cliente_dialog.dart';
 import 'debug_logs_screen.dart';
+import 'package:sqflite/sqflite.dart' as sqflite;
+
 
 class CrearVisitaScreen extends StatefulWidget {
   final DateTime? fechaSeleccionada;
@@ -247,66 +249,66 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       DebugLogger.log('🔄 Sincronizando agenda del comercial $_comercialId...');
       final db = DatabaseHelper.instance;
 
-      try {
-        await db.limpiarAgenda();
-        DebugLogger.log('🗑️ Agenda local limpiada');
+  // NO sincronizar todo, solo insertar la visita nueva
+// NO sincronizar todo, solo insertar la visita nueva
+// Guardar la visita nueva localmente
+DebugLogger.log('💾 Guardando visita #$idVelneo en BD local...');
 
-        // IMPORTANTE: Asegurarse de descargar TODAS las páginas
-        final visitasComercial = await apiService.obtenerAgenda(_comercialId);
-        DebugLogger.log(
-          '📥 Descargadas ${visitasComercial.length} visitas de la API',
-        );
 
-        if (visitasComercial.isEmpty) {
-          DebugLogger.log(
-            '⚠️ WARNING: No se descargaron visitas. Reintentando sin filtro...',
-          );
-          final todasVisitas = await apiService.obtenerAgenda(null);
-          DebugLogger.log(
-            '📥 Total visitas sin filtro: ${todasVisitas.length}',
-          );
-
-          // Filtrar manualmente
-          final visitasFiltradas = todasVisitas
-              .where((v) => v['comercial_id'] == _comercialId)
-              .toList();
-          DebugLogger.log(
-            '📥 Filtradas para comercial $_comercialId: ${visitasFiltradas.length}',
-          );
-
-          if (visitasFiltradas.isNotEmpty) {
-            await db.insertarAgendasLote(
-              visitasFiltradas.cast<Map<String, dynamic>>(),
-            );
-          }
-        } else {
-          await db.insertarAgendasLote(
-            visitasComercial.cast<Map<String, dynamic>>(),
-          );
-        }
-
-        DebugLogger.log('💾 Visitas guardadas en BD local');
-
-        // Verificar que se guardó
-        final visitasEnBD = await db.obtenerAgenda(_comercialId);
-        DebugLogger.log(
-          '✅ Verificado: ${visitasEnBD.length} visitas en BD local',
-        );
-
-        // Buscar específicamente la visita recién creada
-        final visitaNueva = visitasEnBD
-            .where((v) => v['id'] == idVelneo)
-            .toList();
-        if (visitaNueva.isNotEmpty) {
-          DebugLogger.log('✅ Visita #$idVelneo encontrada en BD local');
-        } else {
-          DebugLogger.log('⚠️ Visita #$idVelneo NO encontrada en BD local');
-        }
-      } catch (e) {
-        DebugLogger.log('❌ Error al sincronizar: $e');
-      }
-      setState(() => _isLoading = false);
-
+try {
+  // Insertar la nueva visita
+  final database = await db.database;
+  await database.insert(
+    'agenda',
+    {
+      'id': idVelneo,
+      'cliente_id': visitaData['cliente_id'],
+      'tipo_visita': visitaData['tipo_visita'],
+      'asunto': visitaData['asunto'],
+      'comercial_id': visitaData['comercial_id'],
+      'campana_id': visitaData['campana_id'],
+      'fecha_inicio': visitaData['fecha_inicio'],
+      'hora_inicio': visitaData['hora_inicio'],
+      'fecha_fin': visitaData['fecha_fin'],
+      'hora_fin': visitaData['hora_fin'],
+      'descripcion': visitaData['descripcion'],
+      'todo_dia': visitaData['todo_dia'],
+      'lead_id': visitaData['lead_id'],
+      'presupuesto_id': visitaData['presupuesto_id'],
+      'generado': visitaData['generado'],
+      'sincronizado': 1,
+    },
+    conflictAlgorithm: sqflite.ConflictAlgorithm.ignore,
+  );
+  
+  DebugLogger.log('✅ Visita #$idVelneo guardada localmente');
+  
+  // Ahora sincronizar TODAS las visitas del comercial para mantener actualizado
+  DebugLogger.log('🔄 Sincronizando todas las visitas del comercial $_comercialId...');
+  
+  final todasVisitas = await apiService.obtenerAgenda(_comercialId);
+  DebugLogger.log('📥 Descargadas ${todasVisitas.length} visitas totales de la API');
+  
+  if (todasVisitas.isNotEmpty) {
+    // Limpiar agenda y volver a insertar todo
+    await db.limpiarAgenda();
+    await db.insertarAgendasLote(todasVisitas.cast<Map<String, dynamic>>());
+    DebugLogger.log('✅ ${todasVisitas.length} visitas sincronizadas en BD local');
+  }
+  
+  // Verificar que la visita nueva está en la BD
+  final visitasEnBD = await db.obtenerAgenda(_comercialId);
+  final visitaNueva = visitasEnBD.where((v) => v['id'] == idVelneo).toList();
+  
+  if (visitaNueva.isNotEmpty) {
+    DebugLogger.log('✅ Visita #$idVelneo confirmada en BD local');
+  } else {
+    DebugLogger.log('⚠️ Visita #$idVelneo NO encontrada después de sincronizar');
+  }
+  
+} catch (e) {
+  DebugLogger.log('❌ Error al guardar/sincronizar visita: $e');
+}
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
