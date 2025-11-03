@@ -152,17 +152,19 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
     try {
       // Validar hora de inicio
-      if (_horaInicio == null) {
-        _horaInicio = TimeOfDay.now();
-      }
+      TimeOfDay horaInicioFinal = _horaInicio;
 
-      // Construir fecha-hora inicio
+      // Construir fecha-hora inicio con validación
       final fechaHoraInicio = DateTime(
         _fechaInicio!.year,
         _fechaInicio!.month,
         _fechaInicio!.day,
-        _horaInicio!.hour,
-        _horaInicio!.minute,
+        horaInicioFinal.hour,
+        horaInicioFinal.minute,
+      );
+
+      print(
+        '📅 DEBUG - Fecha construida: ${fechaHoraInicio.toIso8601String()}',
       );
 
       // Construir fecha-hora fin si existe
@@ -175,6 +177,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
           _horaFin!.hour,
           _horaFin!.minute,
         );
+        print('📅 DEBUG - Fecha fin: ${fechaHoraFin.toIso8601String()}');
       }
 
       // Preparar datos de la visita
@@ -195,7 +198,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         'generado': 1,
       };
 
-      print('🚀 Subiendo visita a Velneo...');
+      print('📤 DEBUG - Datos a enviar: $visitaData');
 
       // 1. SUBIR A VELNEO PRIMERO
       final prefs = await SharedPreferences.getInstance();
@@ -210,28 +213,52 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         url = 'https://$url';
       }
 
+      print('🚀 Subiendo visita a Velneo...');
+
       final apiService = VelneoAPIService(url, apiKey);
+
+      // Crear en Velneo con mejor manejo de errores
       final resultado = await apiService
           .crearVisitaAgenda(visitaData)
-          .timeout(const Duration(seconds: 45));
+          .timeout(
+            const Duration(seconds: 45),
+            onTimeout: () {
+              throw Exception('Timeout: El servidor tardó más de 45 segundos');
+            },
+          );
 
       final idVelneo = resultado['id'];
       print('✅ Visita creada en Velneo con ID: $idVelneo');
 
-      // 2. SINCRONIZAR SOLO LAS VISITAS DEL COMERCIAL
-      print('🔄 Sincronizando agenda del comercial $_comercialId...');
+      if (idVelneo == null) {
+        throw Exception('No se recibió ID de Velneo');
+      }
+
+      // 2. RECARGAR SOLO DESPUÉS DE CONFIRMAR CREACIÓN EXITOSA
+      print('🔄 Recargando agenda del comercial $_comercialId...');
       final db = DatabaseHelper.instance;
 
-      // Limpiar y recargar agenda del comercial
-      await db.limpiarAgenda();
-      final visitasComercial = await apiService.obtenerAgenda(_comercialId);
-      await db.insertarAgendasLote(
-        visitasComercial.cast<Map<String, dynamic>>(),
-      );
+      try {
+        await db.limpiarAgenda();
+        final visitasComercial = await apiService.obtenerAgenda(_comercialId);
 
-      print(
-        '✅ Agenda sincronizada: ${visitasComercial.length} visitas del comercial',
-      );
+        print('📥 Descargadas ${visitasComercial.length} visitas de Velneo');
+
+        if (visitasComercial.isEmpty) {
+          print('⚠️ WARNING: No se descargaron visitas');
+        }
+
+        await db.insertarAgendasLote(
+          visitasComercial.cast<Map<String, dynamic>>(),
+        );
+
+        // Verificar que se guardó
+        final visitasEnBD = await db.obtenerAgenda(_comercialId);
+        print('💾 Visitas guardadas en BD local: ${visitasEnBD.length}');
+      } catch (e) {
+        print('❌ Error al sincronizar agenda: $e');
+        // No lanzar error aquí, la visita ya se creó en Velneo
+      }
 
       setState(() => _isLoading = false);
 
@@ -239,19 +266,18 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            '✅ Visita #$idVelneo creada y sincronizada correctamente',
-          ),
+          content: Text('✅ Visita #$idVelneo creada correctamente'),
           backgroundColor: const Color(0xFF032458),
           duration: const Duration(seconds: 3),
         ),
       );
 
       Navigator.pop(context, true);
-    } catch (e) {
+    } catch (e, stackTrace) {
       setState(() => _isLoading = false);
 
-      print('❌ Error al crear visita: $e');
+      print('❌ Error completo: $e');
+      print('Stack trace: $stackTrace');
 
       if (!mounted) return;
 
@@ -260,7 +286,21 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         builder: (dialogContext) => AlertDialog(
           title: const Text('Error al crear visita'),
           content: SingleChildScrollView(
-            child: Text(e.toString().replaceAll('Exception: ', '')),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Detalles del error:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                SelectableText(
+                  e.toString(),
+                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(

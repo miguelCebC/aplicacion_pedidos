@@ -831,6 +831,7 @@ class VelneoAPIService {
 
     try {
       print('📝 Creando visita en Velneo: ${visita['asunto']}');
+      print('📝 Datos completos: $visita');
 
       // Preparar la visita en el formato de Velneo
       final visitaVelneo = {
@@ -843,14 +844,17 @@ class VelneoAPIService {
         'tod_dia': visita['todo_dia'] == 1,
       };
 
-      // Agregar campos opcionales solo si existen
-      if (visita['hora_inicio'] != null) {
+      // Agregar campos opcionales solo si existen y no son null
+      if (visita['hora_inicio'] != null &&
+          visita['hora_inicio'].toString().isNotEmpty) {
         visitaVelneo['hor_ini'] = visita['hora_inicio'];
       }
-      if (visita['fecha_fin'] != null) {
+      if (visita['fecha_fin'] != null &&
+          visita['fecha_fin'].toString().isNotEmpty) {
         visitaVelneo['fch_fin'] = visita['fecha_fin'];
       }
-      if (visita['hora_fin'] != null) {
+      if (visita['hora_fin'] != null &&
+          visita['hora_fin'].toString().isNotEmpty) {
         visitaVelneo['hor_fin'] = visita['hora_fin'];
       }
       if (visita['campana_id'] != null && visita['campana_id'] != 0) {
@@ -859,22 +863,17 @@ class VelneoAPIService {
       if (visita['lead_id'] != null && visita['lead_id'] != 0) {
         visitaVelneo['crm_lea'] = visita['lead_id'];
       }
-      if (visita['fecha_proxima_visita'] != null) {
-        visitaVelneo['fch_pro_vis'] = visita['fecha_proxima_visita'];
-      }
 
-      print('📤 Datos a enviar: $visitaVelneo');
+      final jsonData = json.encode(visitaVelneo);
+      print('📤 JSON a enviar a Velneo: $jsonData');
 
       final request = await httpClient
           .postUrl(Uri.parse(_buildUrl('/CRM_AGE')))
           .timeout(const Duration(seconds: 30));
 
-      request.headers.set('Content-Type', 'application/json');
+      request.headers.set('Content-Type', 'application/json; charset=utf-8');
       request.headers.set('Accept', 'application/json');
       request.headers.set('User-Agent', 'Flutter App');
-
-      final jsonData = json.encode(visitaVelneo);
-      print('📦 JSON a enviar: $jsonData'); // ← AÑADIR LOG
       request.write(jsonData);
 
       final response = await request.close().timeout(
@@ -885,8 +884,8 @@ class VelneoAPIService {
           .join()
           .timeout(const Duration(seconds: 10));
 
-      print('📥 Respuesta crear visita - Status: ${response.statusCode}');
-      print('📥 Respuesta body: $stringData'); // ← AÑADIR LOG
+      print('📥 Status HTTP: ${response.statusCode}');
+      print('📥 Respuesta completa: $stringData');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final respuesta = json.decode(stringData);
@@ -900,20 +899,20 @@ class VelneoAPIService {
           visitaId = respuesta['id'];
         }
 
-        print('✅ Visita creada con ID: $visitaId');
-
         if (visitaId == null) {
+          print('⚠️ Respuesta sin ID: $respuesta');
           throw Exception(
-            'No se pudo obtener el ID de la visita creada. Respuesta: $stringData',
+            'No se pudo obtener el ID de la visita creada. Respuesta completa: $stringData',
           );
         }
 
+        print('✅ Visita creada exitosamente con ID: $visitaId');
         return {'id': visitaId, 'success': true};
       }
 
       throw Exception('Error HTTP ${response.statusCode}: $stringData');
     } catch (e) {
-      print('❌ Error en crearVisitaAgenda: $e');
+      print('❌ Error detallado en crearVisitaAgenda: $e');
       rethrow;
     } finally {
       httpClient.close();
