@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
+import '../screens/debug_logs_screen.dart';
 
 class VelneoAPIService {
   final String baseUrl;
@@ -390,7 +391,7 @@ class VelneoAPIService {
       const int pageSize = 1000;
       int totalCount = 0;
 
-      print(
+      DebugLogger.log(
         '📄 Descargando agenda${comercialId != null ? ' del comercial $comercialId' : ''}...',
       );
 
@@ -407,7 +408,7 @@ class VelneoAPIService {
 
         final url = _buildUrlWithParams('/CRM_AGE', params);
 
-        print('  📥 Página $page');
+        DebugLogger.log('  📥 Descargando página $page...');
 
         try {
           final response = await _getWithSSL(
@@ -419,13 +420,14 @@ class VelneoAPIService {
 
             if (data['total_count'] != null) {
               totalCount = data['total_count'];
+              DebugLogger.log('  📊 Total registros: $totalCount');
             }
 
             if (data['crm_age'] != null && data['crm_age'] is List) {
               final agendasList = data['crm_age'] as List;
 
               if (agendasList.isEmpty) {
-                print('  🏁 No hay más registros');
+                DebugLogger.log('  🏁 No hay más registros en página $page');
                 break;
               }
 
@@ -479,28 +481,39 @@ class VelneoAPIService {
                   .toList();
 
               allAgendas.addAll(agendas);
-              print(
-                '  ✅ Página $page: ${agendas.length} entradas válidas (Acumulado: ${allAgendas.length}/$totalCount)',
+              DebugLogger.log(
+                '  ✅ Página $page: ${agendas.length} registros válidos (Total acumulado: ${allAgendas.length}/$totalCount)',
               );
 
+              // Si esta página tiene menos de pageSize, es la última
               if (agendasList.length < pageSize) {
+                DebugLogger.log(
+                  '  🏁 Última página detectada (${agendasList.length} < $pageSize)',
+                );
                 break;
               }
 
+              // Si ya tenemos todos según total_count
               if (totalCount > 0 && allAgendas.length >= totalCount) {
+                DebugLogger.log(
+                  '  🏁 Total alcanzado (${allAgendas.length} >= $totalCount)',
+                );
                 break;
               }
 
+              // Continuar a la siguiente página
               page++;
               await Future.delayed(const Duration(milliseconds: 200));
             } else {
+              DebugLogger.log('  ⚠️ No hay campo crm_age en respuesta');
               break;
             }
           } else {
+            DebugLogger.log('  ❌ Error HTTP ${response.statusCode}');
             throw Exception('Error HTTP ${response.statusCode}');
           }
         } catch (e) {
-          print('❌ Error en página $page: $e');
+          DebugLogger.log('  ❌ Error en página $page: $e');
           if (allAgendas.isEmpty) {
             rethrow;
           }
@@ -508,10 +521,12 @@ class VelneoAPIService {
         }
       }
 
-      print('✅ TOTAL agenda: ${allAgendas.length} eventos válidos');
+      DebugLogger.log(
+        '✅ TOTAL agenda descargada: ${allAgendas.length} eventos válidos',
+      );
       return allAgendas;
     } catch (e) {
-      print('❌ Error en obtenerAgenda: $e');
+      DebugLogger.log('❌ Error en obtenerAgenda: $e');
       rethrow;
     }
   }
@@ -830,10 +845,8 @@ class VelneoAPIService {
       ..connectionTimeout = const Duration(seconds: 30);
 
     try {
-      print('📝 Creando visita en Velneo: ${visita['asunto']}');
-      print('📝 Datos completos: $visita');
+      DebugLogger.log('📝 API: Creando visita "${visita['asunto']}"');
 
-      // Preparar la visita en el formato de Velneo
       final visitaVelneo = {
         'cli': visita['cliente_id'],
         'tip_vis': visita['tipo_visita'],
@@ -844,7 +857,6 @@ class VelneoAPIService {
         'tod_dia': visita['todo_dia'] == 1,
       };
 
-      // Agregar campos opcionales solo si existen y no son null
       if (visita['hora_inicio'] != null &&
           visita['hora_inicio'].toString().isNotEmpty) {
         visitaVelneo['hor_ini'] = visita['hora_inicio'];
@@ -865,7 +877,8 @@ class VelneoAPIService {
       }
 
       final jsonData = json.encode(visitaVelneo);
-      print('📤 JSON a enviar a Velneo: $jsonData');
+      DebugLogger.log('📤 API: JSON enviado (${jsonData.length} chars)');
+      DebugLogger.log('📤 API: Fecha en JSON: ${visitaVelneo['fch_ini']}');
 
       final request = await httpClient
           .postUrl(Uri.parse(_buildUrl('/CRM_AGE')))
@@ -884,8 +897,13 @@ class VelneoAPIService {
           .join()
           .timeout(const Duration(seconds: 10));
 
-      print('📥 Status HTTP: ${response.statusCode}');
-      print('📥 Respuesta completa: $stringData');
+      DebugLogger.log('📥 API: Status ${response.statusCode}');
+
+      if (stringData.length < 500) {
+        DebugLogger.log('📥 API: Respuesta: $stringData');
+      } else {
+        DebugLogger.log('📥 API: Respuesta larga (${stringData.length} chars)');
+      }
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final respuesta = json.decode(stringData);
@@ -900,98 +918,18 @@ class VelneoAPIService {
         }
 
         if (visitaId == null) {
-          print('⚠️ Respuesta sin ID: $respuesta');
-          throw Exception(
-            'No se pudo obtener el ID de la visita creada. Respuesta completa: $stringData',
-          );
+          DebugLogger.log('⚠️ API: No se encontró ID en respuesta');
+          throw Exception('No se pudo obtener el ID de la visita');
         }
 
-        print('✅ Visita creada exitosamente con ID: $visitaId');
+        DebugLogger.log('✅ API: Visita creada con ID $visitaId');
         return {'id': visitaId, 'success': true};
       }
 
-      throw Exception('Error HTTP ${response.statusCode}: $stringData');
+      DebugLogger.log('❌ API: Error HTTP ${response.statusCode}');
+      throw Exception('Error HTTP ${response.statusCode}');
     } catch (e) {
-      print('❌ Error detallado en crearVisitaAgenda: $e');
-      rethrow;
-    } finally {
-      httpClient.close();
-    }
-  }
-
-  Future<Map<String, dynamic>> actualizarVisitaAgenda(
-    int visitaId,
-    Map<String, dynamic> visita,
-  ) async {
-    final httpClient = HttpClient()
-      ..badCertificateCallback =
-          ((X509Certificate cert, String host, int port) => true)
-      ..connectionTimeout = const Duration(seconds: 30);
-
-    try {
-      print('📝 Actualizando visita #$visitaId en Velneo...');
-
-      // Preparar la visita en el formato de Velneo
-      final visitaVelneo = {
-        'cli': visita['cliente_id'],
-        'tip_vis': visita['tipo_visita'],
-        'asu': visita['asunto'],
-        'com': visita['comercial_id'],
-        'fch_ini': visita['fecha_inicio'],
-        'dsc': visita['descripcion'] ?? '',
-        'tod_dia': visita['todo_dia'] == 1,
-      };
-
-      // Agregar campos opcionales
-      if (visita['hora_inicio'] != null) {
-        visitaVelneo['hor_ini'] = visita['hora_inicio'];
-      }
-      if (visita['fecha_fin'] != null) {
-        visitaVelneo['fch_fin'] = visita['fecha_fin'];
-      }
-      if (visita['hora_fin'] != null) {
-        visitaVelneo['hor_fin'] = visita['hora_fin'];
-      }
-      if (visita['campana_id'] != null && visita['campana_id'] != 0) {
-        visitaVelneo['crm_cam_com'] = visita['campana_id'];
-      }
-      if (visita['lead_id'] != null && visita['lead_id'] != 0) {
-        visitaVelneo['crm_lea'] = visita['lead_id'];
-      }
-      if (visita['fecha_proxima_visita'] != null) {
-        visitaVelneo['fch_pro_vis'] = visita['fecha_proxima_visita'];
-      }
-
-      print('📤 Datos a actualizar: $visitaVelneo');
-
-      final request = await httpClient
-          .putUrl(Uri.parse(_buildUrl('/CRM_AGE/$visitaId')))
-          .timeout(const Duration(seconds: 30));
-
-      request.headers.set('Content-Type', 'application/json');
-      request.headers.set('Accept', 'application/json');
-      request.headers.set('User-Agent', 'Flutter App');
-      request.write(json.encode(visitaVelneo));
-
-      final response = await request.close().timeout(
-        const Duration(seconds: 30),
-      );
-      final stringData = await response
-          .transform(utf8.decoder)
-          .join()
-          .timeout(const Duration(seconds: 10));
-
-      print('📥 Respuesta actualizar visita - Status: ${response.statusCode}');
-
-      if (response.statusCode == 200 || response.statusCode == 204) {
-        print('✅ Visita #$visitaId actualizada en Velneo');
-
-        return {'id': visitaId, 'success': true};
-      }
-
-      throw Exception('Error HTTP ${response.statusCode}: $stringData');
-    } catch (e) {
-      print('❌ Error en actualizarVisitaAgenda: $e');
+      DebugLogger.log('❌ API: Excepción - $e');
       rethrow;
     } finally {
       httpClient.close();

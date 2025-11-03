@@ -13,7 +13,7 @@ void main() {
 }
 
 class VelneoApp extends StatefulWidget {
-  const VelneoApp({Key? key}) : super(key: key);
+  const VelneoApp({super.key});
 
   @override
   State<VelneoApp> createState() => _VelneoAppState();

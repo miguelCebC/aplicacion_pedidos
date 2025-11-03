@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import '../services/api_service.dart';
 import '../widgets/buscar_cliente_dialog.dart';
+import 'debug_logs_screen.dart';
 
 class CrearVisitaScreen extends StatefulWidget {
   final DateTime? fechaSeleccionada;
@@ -118,7 +119,10 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   }
 
   Future<void> _guardarVisita() async {
+    DebugLogger.log('🚀 Iniciando creación de visita');
+
     if (_asuntoController.text.isEmpty) {
+      DebugLogger.log('❌ Asunto vacío');
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('El asunto es obligatorio')));
@@ -126,6 +130,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     }
 
     if (_clienteSeleccionado == null) {
+      DebugLogger.log('❌ Cliente no seleccionado');
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Selecciona un cliente')));
@@ -133,6 +138,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     }
 
     if (_comercialId == null) {
+      DebugLogger.log('❌ Comercial no configurado');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No hay comercial asignado. Ve a Configuración'),
@@ -142,6 +148,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     }
 
     if (_tipoVisita == null) {
+      DebugLogger.log('❌ Tipo de visita no seleccionado');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Selecciona un tipo de visita')),
       );
@@ -151,10 +158,13 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Validar hora de inicio
       TimeOfDay horaInicioFinal = _horaInicio;
 
-      // Construir fecha-hora inicio con validación
+      DebugLogger.log('📅 Fecha inicio: ${_fechaInicio!.toString()}');
+      DebugLogger.log(
+        '⏰ Hora inicio: ${horaInicioFinal.hour}:${horaInicioFinal.minute}',
+      );
+
       final fechaHoraInicio = DateTime(
         _fechaInicio!.year,
         _fechaInicio!.month,
@@ -163,11 +173,10 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         horaInicioFinal.minute,
       );
 
-      print(
-        '📅 DEBUG - Fecha construida: ${fechaHoraInicio.toIso8601String()}',
+      DebugLogger.log(
+        '📅 Fecha-hora construida: ${fechaHoraInicio.toIso8601String()}',
       );
 
-      // Construir fecha-hora fin si existe
       DateTime? fechaHoraFin;
       if (_fechaFin != null && _horaFin != null) {
         fechaHoraFin = DateTime(
@@ -177,10 +186,9 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
           _horaFin!.hour,
           _horaFin!.minute,
         );
-        print('📅 DEBUG - Fecha fin: ${fechaHoraFin.toIso8601String()}');
+        DebugLogger.log('📅 Fecha-hora fin: ${fechaHoraFin.toIso8601String()}');
       }
 
-      // Preparar datos de la visita
       final visitaData = {
         'cliente_id': _clienteSeleccionado!['id'],
         'tipo_visita': _tipoVisita,
@@ -198,9 +206,10 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         'generado': 1,
       };
 
-      print('📤 DEBUG - Datos a enviar: $visitaData');
+      DebugLogger.log(
+        '📦 Datos preparados: Cliente=${visitaData['cliente_id']}, Tipo=${visitaData['tipo_visita']}',
+      );
 
-      // 1. SUBIR A VELNEO PRIMERO
       final prefs = await SharedPreferences.getInstance();
       String url = prefs.getString('velneo_url') ?? '';
       final String apiKey = prefs.getString('velneo_api_key') ?? '';
@@ -213,62 +222,109 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         url = 'https://$url';
       }
 
-      print('🚀 Subiendo visita a Velneo...');
+      DebugLogger.log('🌐 Conectando a: $url');
 
       final apiService = VelneoAPIService(url, apiKey);
 
-      // Crear en Velneo con mejor manejo de errores
+      DebugLogger.log('📤 Enviando visita a Velneo...');
+
       final resultado = await apiService
           .crearVisitaAgenda(visitaData)
           .timeout(
             const Duration(seconds: 45),
             onTimeout: () {
+              DebugLogger.log('❌ TIMEOUT después de 45 segundos');
               throw Exception('Timeout: El servidor tardó más de 45 segundos');
             },
           );
 
       final idVelneo = resultado['id'];
-      print('✅ Visita creada en Velneo con ID: $idVelneo');
+      DebugLogger.log('✅ Visita creada con ID: $idVelneo');
 
       if (idVelneo == null) {
         throw Exception('No se recibió ID de Velneo');
       }
-
-      // 2. RECARGAR SOLO DESPUÉS DE CONFIRMAR CREACIÓN EXITOSA
-      print('🔄 Recargando agenda del comercial $_comercialId...');
+      DebugLogger.log('🔄 Sincronizando agenda del comercial $_comercialId...');
       final db = DatabaseHelper.instance;
 
       try {
         await db.limpiarAgenda();
-        final visitasComercial = await apiService.obtenerAgenda(_comercialId);
+        DebugLogger.log('🗑️ Agenda local limpiada');
 
-        print('📥 Descargadas ${visitasComercial.length} visitas de Velneo');
+        // IMPORTANTE: Asegurarse de descargar TODAS las páginas
+        final visitasComercial = await apiService.obtenerAgenda(_comercialId);
+        DebugLogger.log(
+          '📥 Descargadas ${visitasComercial.length} visitas de la API',
+        );
 
         if (visitasComercial.isEmpty) {
-          print('⚠️ WARNING: No se descargaron visitas');
+          DebugLogger.log(
+            '⚠️ WARNING: No se descargaron visitas. Reintentando sin filtro...',
+          );
+          final todasVisitas = await apiService.obtenerAgenda(null);
+          DebugLogger.log(
+            '📥 Total visitas sin filtro: ${todasVisitas.length}',
+          );
+
+          // Filtrar manualmente
+          final visitasFiltradas = todasVisitas
+              .where((v) => v['comercial_id'] == _comercialId)
+              .toList();
+          DebugLogger.log(
+            '📥 Filtradas para comercial $_comercialId: ${visitasFiltradas.length}',
+          );
+
+          if (visitasFiltradas.isNotEmpty) {
+            await db.insertarAgendasLote(
+              visitasFiltradas.cast<Map<String, dynamic>>(),
+            );
+          }
+        } else {
+          await db.insertarAgendasLote(
+            visitasComercial.cast<Map<String, dynamic>>(),
+          );
         }
 
-        await db.insertarAgendasLote(
-          visitasComercial.cast<Map<String, dynamic>>(),
-        );
+        DebugLogger.log('💾 Visitas guardadas en BD local');
 
         // Verificar que se guardó
         final visitasEnBD = await db.obtenerAgenda(_comercialId);
-        print('💾 Visitas guardadas en BD local: ${visitasEnBD.length}');
-      } catch (e) {
-        print('❌ Error al sincronizar agenda: $e');
-        // No lanzar error aquí, la visita ya se creó en Velneo
-      }
+        DebugLogger.log(
+          '✅ Verificado: ${visitasEnBD.length} visitas en BD local',
+        );
 
+        // Buscar específicamente la visita recién creada
+        final visitaNueva = visitasEnBD
+            .where((v) => v['id'] == idVelneo)
+            .toList();
+        if (visitaNueva.isNotEmpty) {
+          DebugLogger.log('✅ Visita #$idVelneo encontrada en BD local');
+        } else {
+          DebugLogger.log('⚠️ Visita #$idVelneo NO encontrada en BD local');
+        }
+      } catch (e) {
+        DebugLogger.log('❌ Error al sincronizar: $e');
+      }
       setState(() => _isLoading = false);
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ Visita #$idVelneo creada correctamente'),
+          content: Text('✅ Visita #$idVelneo creada'),
           backgroundColor: const Color(0xFF032458),
-          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Ver Logs',
+            textColor: Colors.white,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const DebugLogsScreen(),
+                ),
+              );
+            },
+          ),
         ),
       );
 
@@ -276,8 +332,8 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     } catch (e, stackTrace) {
       setState(() => _isLoading = false);
 
-      print('❌ Error completo: $e');
-      print('Stack trace: $stackTrace');
+      DebugLogger.log('❌ ERROR CRÍTICO: $e');
+      DebugLogger.log('Stack: ${stackTrace.toString().substring(0, 200)}');
 
       if (!mounted) return;
 
@@ -285,22 +341,24 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Error al crear visita'),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Detalles del error:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                SelectableText(
-                  e.toString(),
-                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
-                ),
-              ],
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(e.toString()),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const DebugLogsScreen(),
+                    ),
+                  );
+                },
+                child: const Text('Ver Logs Completos'),
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -316,7 +374,23 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Nueva Visita')),
+      appBar: AppBar(
+        title: const Text('Nueva Visita'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.bug_report),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const DebugLogsScreen(),
+                ),
+              );
+            },
+            tooltip: 'Ver logs de depuración',
+          ),
+        ],
+      ),
       body: _isLoading
           ? Center(
               child: Column(

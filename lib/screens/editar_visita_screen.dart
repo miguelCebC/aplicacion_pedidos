@@ -221,18 +221,15 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Validar hora de inicio
-      if (_horaInicio == null) {
-        _horaInicio = TimeOfDay(hour: 0, minute: 0);
-      }
+      final db = DatabaseHelper.instance;
 
       // Construir fecha-hora inicio
       final fechaHoraInicio = DateTime(
         _fechaInicio!.year,
         _fechaInicio!.month,
         _fechaInicio!.day,
-        _horaInicio!.hour,
-        _horaInicio!.minute,
+        _horaInicio?.hour ?? 0,
+        _horaInicio?.minute ?? 0,
       );
 
       // Construir fecha-hora fin si existe
@@ -249,6 +246,8 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
 
       // Preparar datos actualizados
       final visitaActualizada = {
+        'id': widget.visita['id'],
+        'nombre': widget.visita['nombre'] ?? '',
         'cliente_id': _clienteSeleccionado!['id'],
         'tipo_visita': _tipoVisita,
         'asunto': _asuntoController.text,
@@ -258,49 +257,21 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         'hora_inicio': fechaHoraInicio.toIso8601String(),
         'fecha_fin': fechaHoraFin?.toIso8601String(),
         'hora_fin': fechaHoraFin?.toIso8601String(),
-        'fecha_proxima_visita': widget.visita['fecha_proxima_visita'],
-        'hora_proxima_visita': widget.visita['hora_proxima_visita'],
         'descripcion': _descripcionController.text,
         'todo_dia': _todoDia ? 1 : 0,
         'lead_id': widget.visita['lead_id'] ?? 0,
         'presupuesto_id': widget.visita['presupuesto_id'] ?? 0,
         'generado': widget.visita['generado'] ?? 1,
+        'sincronizado': 0, // Marcar como no sincronizado al editar
       };
 
-      print('🚀 Actualizando visita en Velneo...');
-
-      // 1. ACTUALIZAR EN VELNEO PRIMERO
-      final prefs = await SharedPreferences.getInstance();
-      String url = prefs.getString('velneo_url') ?? '';
-      final String apiKey = prefs.getString('velneo_api_key') ?? '';
-
-      if (url.isEmpty || apiKey.isEmpty) {
-        throw Exception('Configura la URL y API Key en Configuración');
-      }
-
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://$url';
-      }
-
-      final apiService = VelneoAPIService(url, apiKey);
-      await apiService
-          .actualizarVisitaAgenda(widget.visita['id'], visitaActualizada)
-          .timeout(const Duration(seconds: 45));
-
-      print('✅ Visita actualizada en Velneo');
-
-      // 2. SINCRONIZAR SOLO LAS VISITAS DEL COMERCIAL
-      print('🔄 Sincronizando agenda del comercial $_comercialId...');
-      final db = DatabaseHelper.instance;
-
-      await db.limpiarAgenda();
-      final visitasComercial = await apiService.obtenerAgenda(_comercialId);
-      await db.insertarAgendasLote(
-        visitasComercial.cast<Map<String, dynamic>>(),
-      );
-
-      print(
-        '✅ Agenda sincronizada: ${visitasComercial.length} visitas del comercial',
+      // Actualizar en base de datos local
+      final database = await db.database;
+      await database.update(
+        'agenda',
+        visitaActualizada,
+        where: 'id = ?',
+        whereArgs: [widget.visita['id']],
       );
 
       setState(() => _isLoading = false);
@@ -309,32 +280,24 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('✅ Visita actualizada y sincronizada correctamente'),
+          content: Text('✅ Visita actualizada (pendiente de sincronizar)'),
           backgroundColor: Color(0xFF032458),
         ),
       );
 
-      Navigator.pop(context, true);
+      Navigator.pop(
+        context,
+        true,
+      ); // Devolver true para indicar que hubo cambios
     } catch (e) {
       setState(() => _isLoading = false);
 
-      print('❌ Error al actualizar visita: $e');
-
       if (!mounted) return;
 
-      showDialog(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Error al actualizar visita'),
-          content: SingleChildScrollView(
-            child: Text(e.toString().replaceAll('Exception: ', '')),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cerrar'),
-            ),
-          ],
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al actualizar visita: $e'),
+          backgroundColor: const Color(0xFFF44336),
         ),
       );
     }
