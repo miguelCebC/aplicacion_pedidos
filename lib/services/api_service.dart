@@ -887,6 +887,7 @@ class VelneoAPIService {
         'fch_ini': visita['fecha_inicio'],
         'dsc': visita['descripcion'] ?? '',
         'tod_dia': visita['todo_dia'] == 1,
+        'no_gen_tri': true,
       };
 
       if (visita['hora_inicio'] != null &&
@@ -907,7 +908,8 @@ class VelneoAPIService {
       if (visita['lead_id'] != null && visita['lead_id'] != 0) {
         visitaVelneo['crm_lea'] = visita['lead_id'];
       }
-
+      DebugLogger.log('📤 API: Payload fch_ini: ${visitaVelneo['fch_ini']}');
+      DebugLogger.log('📤 API: Payload hor_ini: ${visitaVelneo['hor_ini']}');
       final jsonData = json.encode(visitaVelneo);
       DebugLogger.log('📤 API: JSON enviado (${jsonData.length} chars)');
       DebugLogger.log('📤 API: Fecha en JSON: ${visitaVelneo['fch_ini']}');

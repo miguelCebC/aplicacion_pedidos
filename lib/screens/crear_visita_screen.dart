@@ -122,11 +122,17 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   Future<void> _guardarVisita() async {
     // Protección contra doble clic
     if (_guardando) {
-      DebugLogger.log('⚠️ Ya se está guardando, ignorando llamada duplicada');
+      DebugLogger.log('⚠️ BLOQUEADO: Ya se está guardando una visita');
       return;
     }
 
-    DebugLogger.log('🚀 ========== INICIO _guardarVisita ==========');
+    // Generar ID único para esta ejecución
+    final ejecutionId = DateTime.now().millisecondsSinceEpoch;
+
+    DebugLogger.log(
+      '🚀 ========== INICIO _guardarVisita (ID: $ejecutionId) ==========',
+    );
+
     DebugLogger.log(
       '🚀 Stack trace: ${StackTrace.current.toString().substring(0, 200)}',
     );
@@ -173,25 +179,33 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     try {
       TimeOfDay horaInicioFinal = _horaInicio;
 
+      // ... (dentro de _guardarVisita)
+
       DebugLogger.log('📅 Fecha inicio: ${_fechaInicio!.toString()}');
       DebugLogger.log(
-        '⏰ Hora inicio: ${horaInicioFinal.hour}:${horaInicioFinal.minute}',
+        '⏰ Hora inicio: ${_horaInicio.hour}:${_horaInicio.minute}',
       );
 
       final fechaHoraInicio = DateTime(
         _fechaInicio!.year,
         _fechaInicio!.month,
         _fechaInicio!.day,
-        horaInicioFinal.hour,
-        horaInicioFinal.minute,
+        _horaInicio.hour,
+        _horaInicio.minute,
       );
 
-      DebugLogger.log(
-        '📅 Fecha-hora construida: ${fechaHoraInicio.toIso8601String()}',
-      );
+      // ==================================================
+      // == 🟢 INICIO DE LA CORRECCIÓN ==
+      // ==================================================
 
-      DateTime? fechaHoraFin;
+      // Formatear la HORA INICIO como "HH:MM:SS"
+      final String horaInicioStr =
+          '${_horaInicio.hour.toString().padLeft(2, '0')}:${_horaInicio.minute.toString().padLeft(2, '0')}:00';
+      DateTime fechaHoraFin;
+      String horaFinStr;
+
       if (_fechaFin != null && _horaFin != null) {
+        // 1. El usuario SÍ especificó una hora de fin
         fechaHoraFin = DateTime(
           _fechaFin!.year,
           _fechaFin!.month,
@@ -199,8 +213,25 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
           _horaFin!.hour,
           _horaFin!.minute,
         );
-        DebugLogger.log('📅 Fecha-hora fin: ${fechaHoraFin.toIso8601String()}');
+        horaFinStr =
+            '${_horaFin!.hour.toString().padLeft(2, '0')}:${_horaFin!.minute.toString().padLeft(2, '0')}:00';
+
+        DebugLogger.log(
+          '📅 Fecha-hora fin (especificada): ${fechaHoraFin.toIso8601String()}',
+        );
+      } else {
+        // 2. El usuario NO especificó una hora de fin
+        // WORKAROUND: Usamos la hora de inicio para evitar el bug de Velneo
+        fechaHoraFin = fechaHoraInicio; // Usar el DateTime de INICIO
+        horaFinStr = horaInicioStr; // Usar el String de HORA de INICIO
+
+        DebugLogger.log(
+          '📅 Fecha-hora fin (auto-completada): ${fechaHoraFin.toIso8601String()}',
+        );
       }
+      DebugLogger.log(
+        '📅 Fecha-hora construida: ${fechaHoraInicio.toIso8601String()}',
+      );
 
       final visitaData = {
         'cliente_id': _clienteSeleccionado!['id'],
@@ -208,21 +239,28 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         'asunto': _asuntoController.text,
         'comercial_id': _comercialId,
         'campana_id': _campanaSeleccionada ?? 0,
-        'fecha_inicio': fechaHoraInicio.toIso8601String(),
-        'hora_inicio': fechaHoraInicio.toIso8601String(),
-        'fecha_fin': fechaHoraFin?.toIso8601String(),
-        'hora_fin': fechaHoraFin?.toIso8601String(),
+        'fecha_inicio': fechaHoraInicio
+            .toIso8601String(), // Correcto: Fecha/Hora completa
+        'hora_inicio': horaInicioStr, // Corregido: "HH:MM:SS"
+        'fecha_fin': fechaHoraFin
+            ?.toIso8601String(), // Correcto: Fecha/Hora completa (o null)
+        'hora_fin': horaFinStr, // Corregido: "HH:MM:SS" (o null)
         'descripcion': _descripcionController.text,
         'todo_dia': _todoDia ? 1 : 0,
         'lead_id': 0,
         'presupuesto_id': 0,
-        'generado': 1,
+        'generado': 0,
       };
+
+      // ==================================================
+      // == 🟢 FIN DE LA CORRECCIÓN ==
+      // ==================================================
 
       DebugLogger.log(
         '📦 Datos preparados: Cliente=${visitaData['cliente_id']}, Tipo=${visitaData['tipo_visita']}',
       );
-
+      // ... (resto de la función)
+      // ... (resto de la función)
       final prefs = await SharedPreferences.getInstance();
       String url = prefs.getString('velneo_url') ?? '';
       final String apiKey = prefs.getString('velneo_api_key') ?? '';
@@ -246,12 +284,14 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
           .timeout(
             const Duration(seconds: 45),
             onTimeout: () {
-              DebugLogger.log('❌ TIMEOUT después de 45 segundos');
+              DebugLogger.log('❌ TIMEOUT (ID: $ejecutionId)');
               throw Exception('Timeout: El servidor tardó más de 45 segundos');
             },
           );
 
-      DebugLogger.log('📥 ===== RESPUESTA DE crearVisitaAgenda =====');
+      DebugLogger.log(
+        '📥 ===== RESPUESTA crearVisitaAgenda (ID: $ejecutionId) =====',
+      );
 
       final idVelneo = resultado['id'];
       DebugLogger.log('✅ Visita creada con ID: $idVelneo');
@@ -263,37 +303,32 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       DebugLogger.log('🔄 Sincronizando agenda del comercial $_comercialId...');
       final db = DatabaseHelper.instance;
 
+      final visitaLocal = Map<String, dynamic>.from(visitaData);
+      visitaLocal['id'] = idVelneo;
+      visitaLocal['sincronizado'] = 1; // Marcar como sincronizado
+
       try {
-        await db.limpiarAgenda();
-        DebugLogger.log('🗑️ Agenda local limpiada');
+        // Usamos insertarAgendasLote con un solo elemento y 'replace'
+        // para asegurar que se guarda/actualiza.
+        await db.insertarAgendasLote([visitaLocal]);
 
-        final visitasComercial = await apiService.obtenerAgenda(_comercialId);
-        DebugLogger.log('📥 Descargadas ${visitasComercial.length} visitas');
-
-        if (visitasComercial.isEmpty) {
-          DebugLogger.log('⚠️ WARNING: No se descargaron visitas');
-        }
-
-        await db.insertarAgendasLote(
-          visitasComercial.cast<Map<String, dynamic>>(),
-        );
-        DebugLogger.log('💾 Visitas guardadas en BD local');
+        DebugLogger.log('✅ Visita #$idVelneo guardada en BD local');
 
         final visitasEnBD = await db.obtenerAgenda(_comercialId);
-        DebugLogger.log('✅ Verificado: ${visitasEnBD.length} visitas en BD');
-
         final visitaNueva = visitasEnBD
             .where((v) => v['id'] == idVelneo)
             .toList();
+
         if (visitaNueva.isNotEmpty) {
-          DebugLogger.log('✅ Visita #$idVelneo encontrada en BD local');
+          DebugLogger.log('✅ Verificado: Visita #$idVelneo encontrada en BD');
         } else {
-          DebugLogger.log('⚠️ Visita #$idVelneo NO encontrada en BD local');
+          DebugLogger.log(
+            '⚠️ Verificado: Visita #$idVelneo NO encontrada en BD',
+          );
         }
       } catch (e) {
-        DebugLogger.log('❌ Error al sincronizar: $e');
+        DebugLogger.log('❌ Error al guardar visita local: $e');
       }
-
       setState(() {
         _isLoading = false;
         _guardando = false; // ← LIBERAR FLAG
@@ -576,7 +611,9 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
                 // Botón guardar
                 ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _guardarVisita,
+                  onPressed: _isLoading || _guardando
+                      ? null
+                      : _guardarVisita, // ← CAMBIAR AQUÍ
                   icon: const Icon(Icons.save),
                   label: const Text('CREAR VISITA'),
                   style: ElevatedButton.styleFrom(
