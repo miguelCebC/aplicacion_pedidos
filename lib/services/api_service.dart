@@ -969,7 +969,112 @@ class VelneoAPIService {
       httpClient.close();
     }
   }
+  // ... (después de crearVisitaAgenda) ...
 
+  Future<Map<String, dynamic>> actualizarVisitaAgenda(
+    String visitaId,
+    Map<String, dynamic> visita,
+  ) async {
+    final httpClient = HttpClient()
+      ..badCertificateCallback =
+          ((X509Certificate cert, String host, int port) => true)
+      ..connectionTimeout = const Duration(seconds: 30);
+
+    try {
+      DebugLogger.log(
+        '📝 API: Actualizando (con POST) visita #$visitaId "${visita['asunto']}"',
+      );
+
+      // Preparamos el payload de Velneo
+      // (Aplicamos las mismas correcciones que en 'crear')
+      final visitaVelneo = {
+        'cli': visita['cliente_id'],
+        'tip_vis': visita['tipo_visita'],
+        'asu': visita['asunto'],
+        'com': visita['comercial_id'],
+        'fch_ini': visita['fecha_inicio'],
+        'dsc': visita['descripcion'] ?? '',
+        'tod_dia': visita['todo_dia'] == 1,
+        'no_gen_tri': true, // <-- El FIX que encontramos
+      };
+
+      if (visita['hora_inicio'] != null &&
+          visita['hora_inicio'].toString().isNotEmpty) {
+        visitaVelneo['hor_ini'] = visita['hora_inicio'];
+      }
+      if (visita['fecha_fin'] != null &&
+          visita['fecha_fin'].toString().isNotEmpty) {
+        visitaVelneo['fch_fin'] = visita['fecha_fin'];
+      }
+      if (visita['hora_fin'] != null &&
+          visita['hora_fin'].toString().isNotEmpty) {
+        visitaVelneo['hor_fin'] = visita['hora_fin'];
+      }
+      if (visita['campana_id'] != null && visita['campana_id'] != 0) {
+        visitaVelneo['crm_cam_com'] = visita['campana_id'];
+      }
+      if (visita['lead_id'] != null && visita['lead_id'] != 0) {
+        visitaVelneo['crm_lea'] = visita['lead_id'];
+      }
+
+      final jsonData = json.encode(visitaVelneo);
+      DebugLogger.log('📤 API: Payload fch_ini: ${visitaVelneo['fch_ini']}');
+      DebugLogger.log('📤 API: Payload hor_ini: ${visitaVelneo['hor_ini']}');
+      DebugLogger.log('📤 API: JSON enviado (${jsonData.length} chars)');
+
+      // ==================================================
+      // == 🟢 CORRECCIÓN: Usamos POST al endpoint con ID ==
+      // ==================================================
+      final request = await httpClient
+          .postUrl(
+            Uri.parse(_buildUrl('/CRM_AGE/$visitaId')),
+          ) // <-- POST a /CRM_AGE/{id}
+          .timeout(const Duration(seconds: 30));
+      // ==================================================
+
+      request.headers.set('Content-Type', 'application/json; charset=utf-8');
+      request.headers.set('Accept', 'application/json');
+      request.headers.set('User-Agent', 'Flutter App');
+      request.write(jsonData);
+
+      final response = await request.close().timeout(
+        const Duration(seconds: 30),
+      );
+      final stringData = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 10));
+
+      DebugLogger.log('📥 API: Status ${response.statusCode}');
+      DebugLogger.log('📥 API: Respuesta: $stringData');
+
+      if (response.statusCode == 200) {
+        final respuesta = json.decode(stringData);
+
+        int? idRespuesta;
+        if (respuesta['crm_age'] != null &&
+            respuesta['crm_age'] is List &&
+            (respuesta['crm_age'] as List).isNotEmpty) {
+          idRespuesta = respuesta['crm_age'][0]['id'];
+        } else if (respuesta['id'] != null) {
+          idRespuesta = respuesta['id'];
+        }
+
+        DebugLogger.log('✅ API: Visita actualizada con ID $idRespuesta');
+        return {'id': idRespuesta ?? visitaId, 'success': true};
+      }
+
+      DebugLogger.log('❌ API: Error HTTP ${response.statusCode}');
+      throw Exception('Error HTTP ${response.statusCode}');
+    } catch (e) {
+      DebugLogger.log('❌ API: Excepción - $e');
+      rethrow;
+    } finally {
+      httpClient.close();
+    }
+  }
+
+  // ... (el resto de api_service.dart) ...
   Future<bool> probarConexion() async {
     try {
       final url = _buildUrl('/ART_M');

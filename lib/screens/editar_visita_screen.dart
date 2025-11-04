@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import '../services/api_service.dart';
 import '../widgets/buscar_cliente_dialog.dart';
+import 'debug_logs_screen.dart';
 
 class EditarVisitaScreen extends StatefulWidget {
   final Map<String, dynamic> visita;
@@ -28,7 +29,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
   bool _todoDia = false;
   bool _isLoading = false;
   bool _datosListos = false; // ← AÑADIR ESTA LÍNEA
-
+  bool _guardando = false;
   List<Map<String, dynamic>> _tiposVisita = [];
   List<Map<String, dynamic>> _campanas = [];
 
@@ -188,7 +189,20 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
   }
 
   Future<void> _guardarCambios() async {
+    // Protección contra doble clic
+    if (_guardando) {
+      DebugLogger.log('⚠️ BLOQUEADO: Ya se está guardando una visita');
+      return;
+    }
+
+    // Generar ID único para esta ejecución
+    final ejecutionId = DateTime.now().millisecondsSinceEpoch;
+    DebugLogger.log(
+      '🚀 ========== INICIO _guardarCambios (ID: $ejecutionId) ==========',
+    );
+
     if (_asuntoController.text.isEmpty) {
+      DebugLogger.log('❌ Asunto vacío');
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('El asunto es obligatorio')));
@@ -196,33 +210,38 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
     }
 
     if (_clienteSeleccionado == null) {
+      DebugLogger.log('❌ Cliente no seleccionado');
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Selecciona un cliente')));
       return;
     }
 
-    if (_comercialId == null) {
+    // Comprobar el año
+    final int anoActual = DateTime.now().year;
+    if (_fechaInicio == null || _fechaInicio!.year < anoActual) {
+      DebugLogger.log(
+        '❌ Año inválido: ${_fechaInicio?.year} (Actual: $anoActual)',
+      );
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No hay comercial asignado. Ve a Configuración'),
+        SnackBar(
+          content: Text(
+            'El año de la visita (${_fechaInicio?.year}) no puede ser anterior al año actual ($anoActual)',
+          ),
+          backgroundColor: Colors.orange[800],
         ),
       );
       return;
     }
 
-    if (_tipoVisita == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona un tipo de visita')),
-      );
-      return;
-    }
+    setState(() {
+      _isLoading = true;
+      _guardando = true;
+    });
 
-    setState(() => _isLoading = true);
+    final db = DatabaseHelper.instance;
 
     try {
-      final db = DatabaseHelper.instance;
-
       // Construir fecha-hora inicio
       final fechaHoraInicio = DateTime(
         _fechaInicio!.year,
@@ -232,9 +251,19 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         _horaInicio?.minute ?? 0,
       );
 
-      // Construir fecha-hora fin si existe
-      DateTime? fechaHoraFin;
+      // ==================================================
+      // == 🟢 INICIO DE LA CORRECCIÓN (FORMATO Y WORKAROUND) ==
+      // ==================================================
+
+      // Formatear la HORA INICIO como "HH:MM:SS"
+      final String horaInicioStr =
+          '${(_horaInicio?.hour ?? 0).toString().padLeft(2, '0')}:${(_horaInicio?.minute ?? 0).toString().padLeft(2, '0')}:00';
+
+      DateTime fechaHoraFin;
+      String horaFinStr;
+
       if (_fechaFin != null && _horaFin != null) {
+        // 1. El usuario SÍ especificó una hora de fin
         fechaHoraFin = DateTime(
           _fechaFin!.year,
           _fechaFin!.month,
@@ -242,7 +271,18 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
           _horaFin!.hour,
           _horaFin!.minute,
         );
+        horaFinStr =
+            '${_horaFin!.hour.toString().padLeft(2, '0')}:${_horaFin!.minute.toString().padLeft(2, '0')}:00';
+      } else {
+        // 2. El usuario NO especificó una hora de fin
+        // WORKAROUND: Usamos la hora de inicio para evitar el bug de Velneo
+        fechaHoraFin = fechaHoraInicio; // Usar el DateTime de INICIO
+        horaFinStr = horaInicioStr; // Usar el String de HORA de INICIO
       }
+
+      // ==================================================
+      // == 🟢 FIN DE LA CORRECCIÓN (FORMATO Y WORKAROUND) ==
+      // ==================================================
 
       // Preparar datos actualizados
       final visitaActualizada = {
@@ -254,16 +294,56 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         'comercial_id': _comercialId,
         'campana_id': _campanaSeleccionada ?? 0,
         'fecha_inicio': fechaHoraInicio.toIso8601String(),
-        'hora_inicio': fechaHoraInicio.toIso8601String(),
-        'fecha_fin': fechaHoraFin?.toIso8601String(),
-        'hora_fin': fechaHoraFin?.toIso8601String(),
+        'hora_inicio': horaInicioStr,
+        'fecha_fin': fechaHoraFin.toIso8601String(),
+        'hora_fin': horaFinStr,
         'descripcion': _descripcionController.text,
         'todo_dia': _todoDia ? 1 : 0,
         'lead_id': widget.visita['lead_id'] ?? 0,
         'presupuesto_id': widget.visita['presupuesto_id'] ?? 0,
         'generado': widget.visita['generado'] ?? 1,
-        'sincronizado': 0, // Marcar como no sincronizado al editar
+        'sincronizado': 1, // Marcar como sincronizado
       };
+
+      // ==================================================
+      // == 🟢 INICIO DE LA CORRECCIÓN (LLAMADA API) ==
+      // ==================================================
+
+      final prefs = await SharedPreferences.getInstance();
+      String url = prefs.getString('velneo_url') ?? '';
+      final String apiKey = prefs.getString('velneo_api_key') ?? '';
+
+      if (url.isEmpty || apiKey.isEmpty) {
+        throw Exception('Configura la URL y API Key en Configuración');
+      }
+
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://$url';
+      }
+
+      DebugLogger.log('🌐 Conectando a: $url');
+
+      final apiService = VelneoAPIService(url, apiKey);
+      final String visitaIdVelneo = widget.visita['id'].toString();
+
+      DebugLogger.log('📤 ===== LLAMANDO A actualizarVisitaAgenda =====');
+
+      final resultado = await apiService
+          .actualizarVisitaAgenda(visitaIdVelneo, visitaActualizada)
+          .timeout(
+            const Duration(seconds: 45),
+            onTimeout: () {
+              DebugLogger.log('❌ TIMEOUT (ID: $ejecutionId)');
+              throw Exception('Timeout: El servidor tardó más de 45 segundos');
+            },
+          );
+
+      DebugLogger.log('📥 ===== RESPUESTA actualizarVisitaAgenda =====');
+      DebugLogger.log('✅ Visita #${resultado['id']} actualizada en Velneo');
+
+      // ==================================================
+      // == 🟢 FIN DE LA CORRECCIÓN (LLAMADA API) ==
+      // ==================================================
 
       // Actualizar en base de datos local
       final database = await db.database;
@@ -274,30 +354,79 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         whereArgs: [widget.visita['id']],
       );
 
-      setState(() => _isLoading = false);
+      DebugLogger.log('💾 Visita actualizada en BD local');
+
+      setState(() {
+        _isLoading = false;
+        _guardando = false;
+      });
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Visita actualizada (pendiente de sincronizar)'),
-          backgroundColor: Color(0xFF032458),
-        ),
-      );
-
-      Navigator.pop(
-        context,
-        true,
-      ); // Devolver true para indicar que hubo cambios
-    } catch (e) {
-      setState(() => _isLoading = false);
-
-      if (!mounted) return;
+      DebugLogger.log('✅ ========== FIN _guardarCambios ==========');
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error al actualizar visita: $e'),
-          backgroundColor: const Color(0xFFF44336),
+          content: Text('✅ Visita #${widget.visita['id']} actualizada'),
+          backgroundColor: const Color(0xFF032458),
+          action: SnackBarAction(
+            label: 'Ver Logs',
+            textColor: Colors.white,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const DebugLogsScreen(),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      Navigator.pop(context, true); // Devolver true para recargar
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _guardando = false;
+      });
+
+      DebugLogger.log('❌ ERROR CRÍTICO: $e');
+      DebugLogger.log(
+        '❌ ========== FIN _guardarCambios (CON ERROR) ==========',
+      );
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Error al modificar visita'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(e.toString()),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const DebugLogsScreen(),
+                    ),
+                  );
+                },
+                child: const Text('Ver Logs Completos'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cerrar'),
+            ),
+          ],
         ),
       );
     }
