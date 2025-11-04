@@ -218,34 +218,33 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       }
 
       // ==================================================
-      // == 🟢 2. LÓGICA DE GUARDADO (BASADA EN EL TRIGGER) ==
+      // == 🟢 2. LÓGICA DE GUARDADO (EVITANDO EL TRIGGER) ==
       // ==================================================
 
       String? fechaProximaStr;
       String? horaProximaStr;
-      bool noGenProVis;
-      bool noGenTri;
+      bool crearVisitaManualmente = false;
+
+      // Siempre deshabilitamos el trigger de Velneo
+      const bool noGenProVis = true;
+      const bool noGenTri = true;
 
       if (_visitaCerrada) {
         // --- CASO 1: VISITA CERRADA ---
-        // El usuario ha marcado "Visita Cerrada"
-        DebugLogger.log('📦 Lógica: Visita Cerrada');
-
-        noGenProVis = true; // Como pide el trigger para cerrar
-        noGenTri = true; // MODO SEGURO: Evita el bug 1925
-
-        fechaProximaStr = null;
-        horaProximaStr = null;
+        DebugLogger.log(
+          '📦 Lógica: Visita Cerrada. No se crea próxima visita.',
+        );
+        crearVisitaManualmente = false;
       } else {
-        // --- CASO 2: VISITA ABIERTA ---
-        DebugLogger.log('📦 Lógica: Visita Abierta');
-        noGenProVis = false; // Como pide el trigger para generar
-        noGenTri = false; // Para que entre en el trigger
+        // --- CASO 2: VISITA ABIERTA (CREACIÓN MANUAL) ---
+        DebugLogger.log(
+          '📦 Lógica: Visita Abierta. App creará la próxima visita.',
+        );
+        crearVisitaManualmente = true; // Nuestra app lo hará
 
-        // Si el usuario PUSO fecha/hora, las usamos
+        // Calculamos la fecha/hora que usaremos para la creación manual
         if (_fechaProximaVisita != null && _horaProximaVisita != null) {
-          DebugLogger.log('📦 ...usando fecha/hora manual');
-          // --- CORRECCIÓN DE FORMATO ---
+          DebugLogger.log('📦 ...usando fecha/hora manual para visita nueva');
           fechaProximaStr = _fechaProximaVisita!.toIso8601String().split(
             'T',
           )[0]; // "YYYY-MM-DD"
@@ -253,10 +252,10 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
               '${_horaProximaVisita!.hour.toString().padLeft(2, '0')}:${_horaProximaVisita!.minute.toString().padLeft(2, '0')}:00'; // "HH:MM:SS"
         } else {
           // Si el usuario NO PUSO fecha/hora, las calculamos NOSOTROS
-          // para evitar el bug de addDays() en Velneo.
-          DebugLogger.log('📦 ...calculando fecha/hora por defecto (hoy + 60)');
+          DebugLogger.log(
+            '📦 ...calculando fecha/hora por defecto (hoy + 60) para visita nueva',
+          );
           final fechaDefecto = DateTime.now().add(const Duration(days: 60));
-
           fechaProximaStr = fechaDefecto.toIso8601String().split(
             'T',
           )[0]; // "YYYY-MM-DD"
@@ -271,7 +270,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       );
 
       // ==================================================
-      // == 🟢 3. MAPA VISITADATA (CON CAMPOS CORREGIDOS) ==
+      // == 🟢 3. MAPA VISITADATA (VISITA ACTUAL) ==
       // ==================================================
       final visitaData = {
         'cliente_id': _clienteSeleccionado!['id'],
@@ -287,12 +286,12 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         'todo_dia': _todoDia ? 1 : 0,
         'lead_id': 0,
         'presupuesto_id': 0,
-        'generado': 1, // <-- CORREGIDO A 1 (estaba en 0)
-        // --- Campos de Próxima Visita (AÑADIDOS Y CORREGIDOS) ---
-        'fecha_proxima_visita': fechaProximaStr, // <-- SÓLO FECHA "YYYY-MM-DD"
-        'hora_proxima_visita': horaProximaStr, // <-- SÓLO HORA "HH:MM:SS"
-        'no_gen_pro_vis': noGenProVis, // <-- Condicional
-        'no_gen_tri': noGenTri, // <-- Condicional
+        'generado': 1,
+        // --- Campos de Próxima Visita (SIEMPRE DESACTIVADOS) ---
+        'fecha_proxima_visita': null, // Se gestiona manualmente
+        'hora_proxima_visita': null, // Se gestiona manualmente
+        'no_gen_pro_vis': noGenProVis, // <-- true
+        'no_gen_tri': noGenTri, // <-- true
       };
 
       // ==================================================
@@ -316,8 +315,11 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       DebugLogger.log('🌐 Conectando a: $url');
 
       final apiService = VelneoAPIService(url, apiKey);
+      final db = DatabaseHelper.instance;
 
-      DebugLogger.log('📤 ===== LLAMANDO A crearVisitaAgenda =====');
+      DebugLogger.log(
+        '📤 ===== LLAMANDO A crearVisitaAgenda (Visita Actual) =====',
+      );
 
       final resultado = await apiService
           .crearVisitaAgenda(visitaData)
@@ -334,14 +336,13 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       );
 
       final idVelneo = resultado['id'];
-      DebugLogger.log('✅ Visita creada con ID: $idVelneo');
+      DebugLogger.log('✅ Visita actual creada con ID: $idVelneo');
 
       if (idVelneo == null) {
-        throw Exception('No se recibió ID de Velneo');
+        throw Exception('No se recibió ID de Velneo para la visita actual');
       }
 
-      DebugLogger.log('💾 Guardando visita #$idVelneo en BD local...');
-      final db = DatabaseHelper.instance;
+      DebugLogger.log('💾 Guardando visita actual #$idVelneo en BD local...');
 
       final visitaLocal = Map<String, dynamic>.from(visitaData);
       visitaLocal['id'] = idVelneo;
@@ -349,10 +350,92 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
       try {
         await db.insertarAgendasLote([visitaLocal]);
-        DebugLogger.log('✅ Visita #$idVelneo guardada en BD local');
+        DebugLogger.log('✅ Visita actual #$idVelneo guardada en BD local');
       } catch (e) {
         DebugLogger.log('❌ Error al guardar visita local: $e');
       }
+
+      // [DENTRO DE LA FUNCIÓN _guardarVisita]
+      // ... después de guardar la visita actual ...
+
+      // --- PASO 2: CREACIÓN MANUAL DE LA PRÓXIMA VISITA ---
+      if (crearVisitaManualmente) {
+        DebugLogger.log('🚀 ===== INICIO Creación Manual Próxima Visita =====');
+
+        // Preparamos la *nueva* visita
+        // Parseamos la hora y fecha calculadas
+        final dtProxima = DateTime.parse(fechaProximaStr!);
+        final todProxima = TimeOfDay(
+          hour: int.parse(horaProximaStr!.split(':')[0]),
+          minute: int.parse(horaProximaStr.split(':')[1]),
+        );
+
+        final fechaHoraInicioProxima = DateTime(
+          dtProxima.year,
+          dtProxima.month,
+          dtProxima.day,
+          todProxima.hour,
+          todProxima.minute,
+        );
+
+        // 🟢 INICIO DE CAMBIOS
+        final visitaNuevaData = {
+          'cliente_id': _clienteSeleccionado!['id'],
+          'tipo_visita': _tipoVisita,
+          // 1. Usar el mismo asunto que la visita actual
+          'asunto': _asuntoController.text,
+          'comercial_id': _comercialId,
+          'campana_id': _campanaSeleccionada ?? 0,
+          'fecha_inicio': fechaHoraInicioProxima.toIso8601String(),
+          'hora_inicio': horaProximaStr,
+          'fecha_fin': fechaHoraInicioProxima.toIso8601String(),
+          'hora_fin': horaProximaStr,
+          'descripcion': '',
+          'todo_dia': _todoDia ? 1 : 0,
+          'lead_id': 0,
+          'presupuesto_id': 0,
+          'generado': 1,
+
+          // 2. Desactivar los triggers para ESTA visita
+          'fecha_proxima_visita': null,
+          'hora_proxima_visita': null,
+          'no_gen_pro_vis': true, // 🟢 Evita que esta visita genere otra
+          'no_gen_tri': true, // 🟢 Evita que esta visita genere otra
+        };
+        // 🟢 FIN DE CAMBIOS
+
+        DebugLogger.log(
+          '📤 ===== LLAMANDO A crearVisitaAgenda (Visita Nueva) =====',
+        );
+        final resultadoNuevaVisita = await apiService.crearVisitaAgenda(
+          visitaNuevaData,
+        );
+        DebugLogger.log(
+          '📥 ===== RESPUESTA crearVisitaAgenda (Visita Nueva) =====',
+        );
+
+        // ... resto de la función ...
+
+        final idVelneoNueva = resultadoNuevaVisita['id'];
+        if (idVelneoNueva != null) {
+          DebugLogger.log('✅ Visita nueva creada con ID: $idVelneoNueva');
+          // Guardar también esta en la BD local
+          final visitaLocalNueva = Map<String, dynamic>.from(visitaNuevaData);
+          visitaLocalNueva['id'] = idVelneoNueva;
+          visitaLocalNueva['sincronizado'] = 1;
+          await db.insertarAgendasLote([visitaLocalNueva]);
+          DebugLogger.log('💾 Visita nueva guardada en BD local');
+        } else {
+          DebugLogger.log(
+            '⚠️ Error: La creación manual de la próxima visita no devolvió ID',
+          );
+          // No lanzamos error fatal, pero avisamos
+          throw Exception(
+            'Se guardó la visita actual, pero falló la creación de la próxima visita.',
+          );
+        }
+      }
+
       setState(() {
         _isLoading = false;
         _guardando = false;
@@ -364,7 +447,9 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ Visita #$idVelneo creada'),
+          content: Text(
+            '✅ Visita #${idVelneo} creada ${crearVisitaManualmente ? "y próxima visita generada" : ""}',
+          ),
           backgroundColor: const Color(0xFF032458),
           action: SnackBarAction(
             label: 'Ver Logs',
@@ -389,6 +474,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       });
 
       DebugLogger.log('❌ ERROR CRÍTICO: $e');
+      DebugLogger.log('❌ STACKTRACE: $stackTrace');
       DebugLogger.log('❌ ========== FIN _guardarVisita (CON ERROR) ==========');
 
       if (!mounted) return;

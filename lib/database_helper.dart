@@ -20,7 +20,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       dbFilePath,
-      version: 4,
+      version: 5, // 🟢 VERSIÓN INCREMENTADA A 5
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -155,6 +155,8 @@ class DatabaseHelper {
         presupuesto_id INTEGER,
         generado INTEGER DEFAULT 1,
         sincronizado INTEGER DEFAULT 0,
+        no_gen_pro_vis INTEGER DEFAULT 0, 
+        no_gen_tri INTEGER DEFAULT 0,     
         FOREIGN KEY (cliente_id) REFERENCES clientes (id),
         FOREIGN KEY (comercial_id) REFERENCES comerciales (id),
         FOREIGN KEY (campana_id) REFERENCES campanas_comerciales (id),
@@ -424,17 +426,68 @@ class DatabaseHelper {
       ''');
       print('✅ Tabla tipos_visita creada');
     }
-    if (oldVersion < 4) {
-      // Agregar columna sincronizado a agenda
+
+    // 🟢 INICIO DE NUEVA LÓGICA DE UPGRADE
+    if (oldVersion < 5) {
       try {
         await db.execute(
-          'ALTER TABLE agenda ADD COLUMN sincronizado INTEGER DEFAULT 0',
+          'ALTER TABLE agenda ADD COLUMN no_gen_pro_vis INTEGER DEFAULT 0',
         );
-        print('✅ Columna sincronizado agregada a agenda');
+        print('✅ Columna no_gen_pro_vis agregada a agenda');
       } catch (e) {
-        print('⚠️ Columna sincronizado ya existe en agenda: $e');
+        print('⚠️ Columna no_gen_pro_vis ya existe en agenda: $e');
+      }
+      try {
+        await db.execute(
+          'ALTER TABLE agenda ADD COLUMN no_gen_tri INTEGER DEFAULT 0',
+        );
+        print('✅ Columna no_gen_tri agregada a agenda');
+      } catch (e) {
+        print('⚠️ Columna no_gen_tri ya existe en agenda: $e');
+      }
+
+      // También asegurarse de que la tabla 'agenda' recreada en < 3
+      // tenga los campos si la versión 4 se saltó.
+      // (Esta es una salvaguarda)
+      try {
+        await db.execute('DROP TABLE IF EXISTS agenda_temp_migration');
+        await db.execute('ALTER TABLE agenda RENAME TO agenda_temp_migration');
+
+        // Crear la tabla final con todas las columnas
+        await _createDB(db, 5);
+
+        // Copiar datos antiguos
+        await db.execute('''
+          INSERT INTO agenda(
+            id, nombre, cliente_id, tipo_visita, asunto, comercial_id, campana_id,
+            fecha_inicio, hora_inicio, fecha_fin, hora_fin, 
+            fecha_proxima_visita, hora_proxima_visita,
+            descripcion, todo_dia, lead_id, presupuesto_id, generado, sincronizado
+          )
+          SELECT 
+            id, nombre, cliente_id, tipo_visita, asunto, comercial_id, campana_id,
+            fecha_inicio, hora_inicio, fecha_fin, hora_fin, 
+            fecha_proxima_visita, hora_proxima_visita,
+            descripcion, todo_dia, lead_id, presupuesto_id, generado, sincronizado
+          FROM agenda_temp_migration
+        ''');
+        await db.execute('DROP TABLE agenda_temp_migration');
+        print('✅ Tabla agenda migrada forzosamente a v5');
+      } catch (e) {
+        print(
+          '⚠️ Error en migración forzosa v5 (puede ser normal si no fue necesaria): $e',
+        );
+        // Si falla la migración forzosa, volver a crear la tabla original
+        // e intentar añadir las columnas de nuevo.
+        try {
+          await db.execute('DROP TABLE IF EXISTS agenda_temp_migration');
+          await _createDB(db, 5); // Re-crear todo si falla
+        } catch (e2) {
+          print('❌ Error fatal en migración v5: $e2');
+        }
       }
     }
+    // 🟢 FIN DE NUEVA LÓGICA DE UPGRADE
   }
 
   Future<int> insertarCliente(Map<String, dynamic> cliente) async {
