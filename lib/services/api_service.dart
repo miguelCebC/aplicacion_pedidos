@@ -399,9 +399,9 @@ class VelneoAPIService {
         final params = {
           'page': page.toString(),
           'page_size': pageSize.toString(),
+          'sort': '-id', // Ordenar por ID descendente
         };
 
-        // Añadir filtro por comercial si se especifica
         if (comercialId != null) {
           params['com'] = comercialId.toString();
         }
@@ -437,17 +437,52 @@ class VelneoAPIService {
                         agenda['fch_ini'].toString().isNotEmpty;
                   })
                   .map((agenda) {
+                    // Función mejorada para limpiar fechas
                     String? limpiarFecha(dynamic fecha) {
                       if (fecha == null) return null;
-                      final fechaStr = fecha.toString();
+                      final fechaStr = fecha.toString().trim();
                       if (fechaStr.isEmpty) return null;
 
                       try {
-                        DateTime.parse(fechaStr);
-                        return fechaStr;
+                        // Si ya está en formato ISO, devolverlo
+                        if (fechaStr.contains('T') && fechaStr.contains('Z')) {
+                          DateTime.parse(fechaStr); // Verificar que es válido
+                          return fechaStr;
+                        }
+
+                        // Si es formato de texto como "mar. nov. 4 00:00:00 2025 GMT"
+                        // Intentar parsear y convertir a ISO
+                        if (fechaStr.contains('GMT') ||
+                            fechaStr.contains('UTC')) {
+                          try {
+                            final dt = DateTime.parse(fechaStr);
+                            return dt.toIso8601String();
+                          } catch (e) {
+                            DebugLogger.log(
+                              '⚠️ No se pudo parsear fecha GMT: $fechaStr',
+                            );
+                            return null;
+                          }
+                        }
+
+                        // Intentar parsear como está
+                        final dt = DateTime.parse(fechaStr);
+                        return dt.toIso8601String();
                       } catch (e) {
+                        DebugLogger.log(
+                          '⚠️ Fecha inválida ignorada: $fechaStr - Error: $e',
+                        );
                         return null;
                       }
+                    }
+
+                    // Extraer fecha de inicio (obligatoria)
+                    final fechaInicio = limpiarFecha(agenda['fch_ini']);
+
+                    if (fechaInicio == null) {
+                      DebugLogger.log(
+                        '⚠️ Visita sin fecha válida: ID ${agenda['id']}',
+                      );
                     }
 
                     return {
@@ -459,17 +494,17 @@ class VelneoAPIService {
                       'comercial_id': agenda['com'] ?? 0,
                       'campana_id': agenda['crm_cam_com'] ?? 0,
                       'fecha_inicio':
-                          limpiarFecha(agenda['fch_ini']) ??
-                          DateTime.now().toIso8601String(),
-                      'hora_inicio': limpiarFecha(agenda['hor_ini']),
+                          fechaInicio ?? DateTime.now().toIso8601String(),
+                      'hora_inicio': fechaInicio, // Usar la misma fecha limpia
                       'fecha_fin': limpiarFecha(agenda['fch_fin']),
-                      'hora_fin': limpiarFecha(agenda['hor_fin']),
+                      'hora_fin': limpiarFecha(
+                        agenda['fch_fin'],
+                      ), // Usar fecha_fin también para hora_fin
                       'fecha_proxima_visita': limpiarFecha(
                         agenda['fch_pro_vis'],
                       ),
-                      'hora_proxima_visita': limpiarFecha(
-                        agenda['hor_pro_vis'],
-                      ),
+                      'hora_proxima_visita':
+                          null, // No hay campo separado de hora
                       'descripcion': agenda['dsc']?.toString() ?? '',
                       'todo_dia': (agenda['tod_dia'] == true) ? 1 : 0,
                       'lead_id': agenda['crm_lea'] ?? 0,
@@ -485,7 +520,6 @@ class VelneoAPIService {
                 '  ✅ Página $page: ${agendas.length} registros válidos (Total acumulado: ${allAgendas.length}/$totalCount)',
               );
 
-              // Si esta página tiene menos de pageSize, es la última
               if (agendasList.length < pageSize) {
                 DebugLogger.log(
                   '  🏁 Última página detectada (${agendasList.length} < $pageSize)',
@@ -493,7 +527,6 @@ class VelneoAPIService {
                 break;
               }
 
-              // Si ya tenemos todos según total_count
               if (totalCount > 0 && allAgendas.length >= totalCount) {
                 DebugLogger.log(
                   '  🏁 Total alcanzado (${allAgendas.length} >= $totalCount)',
@@ -501,7 +534,6 @@ class VelneoAPIService {
                 break;
               }
 
-              // Continuar a la siguiente página
               page++;
               await Future.delayed(const Duration(milliseconds: 200));
             } else {

@@ -28,6 +28,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   TimeOfDay? _horaFin;
   bool _todoDia = false;
   bool _isLoading = false;
+  bool _guardando = false; // ← AÑADIR ESTA LÍNEA
 
   List<Map<String, dynamic>> _tiposVisita = [];
   List<Map<String, dynamic>> _campanas = [];
@@ -119,7 +120,16 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   }
 
   Future<void> _guardarVisita() async {
-    DebugLogger.log('🚀 Iniciando creación de visita');
+    // Protección contra doble clic
+    if (_guardando) {
+      DebugLogger.log('⚠️ Ya se está guardando, ignorando llamada duplicada');
+      return;
+    }
+
+    DebugLogger.log('🚀 ========== INICIO _guardarVisita ==========');
+    DebugLogger.log(
+      '🚀 Stack trace: ${StackTrace.current.toString().substring(0, 200)}',
+    );
 
     if (_asuntoController.text.isEmpty) {
       DebugLogger.log('❌ Asunto vacío');
@@ -155,7 +165,10 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _guardando = true; // ← MARCAR COMO GUARDANDO
+    });
 
     try {
       TimeOfDay horaInicioFinal = _horaInicio;
@@ -226,7 +239,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
       final apiService = VelneoAPIService(url, apiKey);
 
-      DebugLogger.log('📤 Enviando visita a Velneo...');
+      DebugLogger.log('📤 ===== LLAMANDO A crearVisitaAgenda =====');
 
       final resultado = await apiService
           .crearVisitaAgenda(visitaData)
@@ -238,12 +251,15 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
             },
           );
 
+      DebugLogger.log('📥 ===== RESPUESTA DE crearVisitaAgenda =====');
+
       final idVelneo = resultado['id'];
       DebugLogger.log('✅ Visita creada con ID: $idVelneo');
 
       if (idVelneo == null) {
         throw Exception('No se recibió ID de Velneo');
       }
+
       DebugLogger.log('🔄 Sincronizando agenda del comercial $_comercialId...');
       final db = DatabaseHelper.instance;
 
@@ -251,49 +267,21 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         await db.limpiarAgenda();
         DebugLogger.log('🗑️ Agenda local limpiada');
 
-        // IMPORTANTE: Asegurarse de descargar TODAS las páginas
         final visitasComercial = await apiService.obtenerAgenda(_comercialId);
-        DebugLogger.log(
-          '📥 Descargadas ${visitasComercial.length} visitas de la API',
-        );
+        DebugLogger.log('📥 Descargadas ${visitasComercial.length} visitas');
 
         if (visitasComercial.isEmpty) {
-          DebugLogger.log(
-            '⚠️ WARNING: No se descargaron visitas. Reintentando sin filtro...',
-          );
-          final todasVisitas = await apiService.obtenerAgenda(null);
-          DebugLogger.log(
-            '📥 Total visitas sin filtro: ${todasVisitas.length}',
-          );
-
-          // Filtrar manualmente
-          final visitasFiltradas = todasVisitas
-              .where((v) => v['comercial_id'] == _comercialId)
-              .toList();
-          DebugLogger.log(
-            '📥 Filtradas para comercial $_comercialId: ${visitasFiltradas.length}',
-          );
-
-          if (visitasFiltradas.isNotEmpty) {
-            await db.insertarAgendasLote(
-              visitasFiltradas.cast<Map<String, dynamic>>(),
-            );
-          }
-        } else {
-          await db.insertarAgendasLote(
-            visitasComercial.cast<Map<String, dynamic>>(),
-          );
+          DebugLogger.log('⚠️ WARNING: No se descargaron visitas');
         }
 
+        await db.insertarAgendasLote(
+          visitasComercial.cast<Map<String, dynamic>>(),
+        );
         DebugLogger.log('💾 Visitas guardadas en BD local');
 
-        // Verificar que se guardó
         final visitasEnBD = await db.obtenerAgenda(_comercialId);
-        DebugLogger.log(
-          '✅ Verificado: ${visitasEnBD.length} visitas en BD local',
-        );
+        DebugLogger.log('✅ Verificado: ${visitasEnBD.length} visitas en BD');
 
-        // Buscar específicamente la visita recién creada
         final visitaNueva = visitasEnBD
             .where((v) => v['id'] == idVelneo)
             .toList();
@@ -305,9 +293,15 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       } catch (e) {
         DebugLogger.log('❌ Error al sincronizar: $e');
       }
-      setState(() => _isLoading = false);
+
+      setState(() {
+        _isLoading = false;
+        _guardando = false; // ← LIBERAR FLAG
+      });
 
       if (!mounted) return;
+
+      DebugLogger.log('✅ ========== FIN _guardarVisita ==========');
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -330,10 +324,13 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
       Navigator.pop(context, true);
     } catch (e, stackTrace) {
-      setState(() => _isLoading = false);
+      setState(() {
+        _isLoading = false;
+        _guardando = false; // ← LIBERAR FLAG EN CASO DE ERROR
+      });
 
       DebugLogger.log('❌ ERROR CRÍTICO: $e');
-      DebugLogger.log('Stack: ${stackTrace.toString().substring(0, 200)}');
+      DebugLogger.log('❌ ========== FIN _guardarVisita (CON ERROR) ==========');
 
       if (!mounted) return;
 
@@ -579,7 +576,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
                 // Botón guardar
                 ElevatedButton.icon(
-                  onPressed: _guardarVisita,
+                  onPressed: _isLoading ? null : _guardarVisita,
                   icon: const Icon(Icons.save),
                   label: const Text('CREAR VISITA'),
                   style: ElevatedButton.styleFrom(
