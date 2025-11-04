@@ -26,12 +26,47 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
   TimeOfDay? _horaInicio;
   DateTime? _fechaFin;
   TimeOfDay? _horaFin;
+  DateTime? _fechaProximaVisita;
+  TimeOfDay? _horaProximaVisita;
   bool _todoDia = false;
   bool _isLoading = false;
-  bool _datosListos = false; // ← AÑADIR ESTA LÍNEA
+  bool _datosListos = false;
   bool _guardando = false;
+
+  // ==================================================
+  // == 🟢 1. "VISITA CERRADA" AÑADIDO ==
+  // ==================================================
+  bool _visitaCerrada = false;
+
   List<Map<String, dynamic>> _tiposVisita = [];
   List<Map<String, dynamic>> _campanas = [];
+
+  DateTime? _parseFecha(String? fechaStr) {
+    if (fechaStr == null || fechaStr.isEmpty) return null;
+    try {
+      return DateTime.parse(fechaStr);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  TimeOfDay? _parseHora(String? horaStr) {
+    if (horaStr == null || horaStr.isEmpty) return null;
+    try {
+      final dt = DateTime.parse(horaStr);
+      return TimeOfDay(hour: dt.hour, minute: dt.minute);
+    } catch (e) {
+      try {
+        final parts = horaStr.split(':');
+        return TimeOfDay(
+          hour: int.parse(parts[0]),
+          minute: int.parse(parts[1]),
+        );
+      } catch (e2) {
+        return null;
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -48,31 +83,30 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         ? null
         : widget.visita['campana_id'];
     _todoDia = widget.visita['todo_dia'] == 1;
-    // Parsear fechas
-    if (widget.visita['fecha_inicio'] != null) {
-      try {
-        final fechaInicio = DateTime.parse(widget.visita['fecha_inicio']);
-        _fechaInicio = fechaInicio;
-        _horaInicio = TimeOfDay(
-          hour: fechaInicio.hour,
-          minute: fechaInicio.minute,
-        );
-      } catch (e) {
-        _fechaInicio = DateTime.now();
-        _horaInicio = TimeOfDay.now();
-      }
-    }
 
-    if (widget.visita['fecha_fin'] != null) {
-      try {
-        final fechaFin = DateTime.parse(widget.visita['fecha_fin']);
-        _fechaFin = fechaFin;
-        _horaFin = TimeOfDay(hour: fechaFin.hour, minute: fechaFin.minute);
-      } catch (e) {
-        _fechaFin = null;
-        _horaFin = null;
-      }
-    }
+    _fechaInicio = _parseFecha(widget.visita['fecha_inicio']);
+    _horaInicio = _parseHora(
+      widget.visita['hora_inicio'] ?? widget.visita['fecha_inicio'],
+    );
+
+    _fechaFin = _parseFecha(widget.visita['fecha_fin']);
+    _horaFin = _parseHora(
+      widget.visita['hora_fin'] ?? widget.visita['fecha_fin'],
+    );
+
+    _fechaProximaVisita = _parseFecha(widget.visita['fecha_proxima_visita']);
+    _horaProximaVisita = _parseHora(widget.visita['hora_proxima_visita']);
+
+    // ==================================================
+    // == 🟢 2. INITSTATE MODIFICADO ==
+    // (Cargamos el estado de 'Visita Cerrada' según el trigger)
+    // ==================================================
+    // El trigger dice que una visita que NO genera otra tiene NO_GEN_TRI = 1
+    // (O si no_gen_pro_vis es true)
+    _visitaCerrada =
+        (widget.visita['no_gen_tri'] == 1) ||
+        (widget.visita['no_gen_pro_vis'] == 1);
+    // ==================================================
 
     _cargarDatos();
   }
@@ -84,7 +118,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
     final tiposVisita = await db.obtenerTiposVisita();
     final campanas = await db.obtenerCampanas();
 
-    // Cargar cliente
     if (widget.visita['cliente_id'] != null &&
         widget.visita['cliente_id'] != 0) {
       final clientes = await db.obtenerClientes();
@@ -103,7 +136,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
       _tiposVisita = tiposVisita;
       _campanas = campanas;
 
-      // Validar que el tipo de visita existe
       if (_tipoVisita != null) {
         final tipoExiste = tiposVisita.any((tipo) => tipo['id'] == _tipoVisita);
         if (!tipoExiste) {
@@ -112,7 +144,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         }
       }
 
-      // Validar que la campaña existe
       if (_campanaSeleccionada != null) {
         final campanaExiste = campanas.any(
           (camp) => camp['id'] == _campanaSeleccionada,
@@ -123,7 +154,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         }
       }
 
-      _datosListos = true; // ← MARCAR COMO LISTO
+      _datosListos = true;
     });
   }
 
@@ -137,12 +168,18 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
     }
   }
 
-  Future<void> _seleccionarFecha(bool esInicio) async {
+  Future<void> _seleccionarFecha(
+    bool esInicio, {
+    bool esProxima = false,
+  }) async {
     final fecha = await showDatePicker(
       context: context,
       initialDate: esInicio
           ? (_fechaInicio ?? DateTime.now())
-          : (_fechaFin ?? DateTime.now()),
+          : (esProxima
+                ? (_fechaProximaVisita ??
+                      DateTime.now().add(const Duration(days: 60)))
+                : (_fechaFin ?? DateTime.now())),
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
       locale: const Locale('es', 'ES'),
@@ -152,6 +189,8 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
       setState(() {
         if (esInicio) {
           _fechaInicio = fecha;
+        } else if (esProxima) {
+          _fechaProximaVisita = fecha;
         } else {
           _fechaFin = fecha;
         }
@@ -159,18 +198,22 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
     }
   }
 
-  Future<void> _seleccionarHora(bool esInicio) async {
+  Future<void> _seleccionarHora(bool esInicio, {bool esProxima = false}) async {
     final hora = await showTimePicker(
       context: context,
       initialTime: esInicio
           ? (_horaInicio ?? TimeOfDay.now())
-          : (_horaFin ?? TimeOfDay.now()),
+          : (esProxima
+                ? (_horaProximaVisita ?? const TimeOfDay(hour: 9, minute: 0))
+                : (_horaFin ?? TimeOfDay.now())),
     );
 
     if (hora != null) {
       setState(() {
         if (esInicio) {
           _horaInicio = hora;
+        } else if (esProxima) {
+          _horaProximaVisita = hora;
         } else {
           _horaFin = hora;
         }
@@ -189,13 +232,11 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
   }
 
   Future<void> _guardarCambios() async {
-    // Protección contra doble clic
     if (_guardando) {
       DebugLogger.log('⚠️ BLOQUEADO: Ya se está guardando una visita');
       return;
     }
 
-    // Generar ID único para esta ejecución
     final ejecutionId = DateTime.now().millisecondsSinceEpoch;
     DebugLogger.log(
       '🚀 ========== INICIO _guardarCambios (ID: $ejecutionId) ==========',
@@ -217,7 +258,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
       return;
     }
 
-    // Comprobar el año
     final int anoActual = DateTime.now().year;
     if (_fechaInicio == null || _fechaInicio!.year < anoActual) {
       DebugLogger.log(
@@ -242,7 +282,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
     final db = DatabaseHelper.instance;
 
     try {
-      // Construir fecha-hora inicio
       final fechaHoraInicio = DateTime(
         _fechaInicio!.year,
         _fechaInicio!.month,
@@ -251,11 +290,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         _horaInicio?.minute ?? 0,
       );
 
-      // ==================================================
-      // == 🟢 INICIO DE LA CORRECCIÓN (FORMATO Y WORKAROUND) ==
-      // ==================================================
-
-      // Formatear la HORA INICIO como "HH:MM:SS"
       final String horaInicioStr =
           '${(_horaInicio?.hour ?? 0).toString().padLeft(2, '0')}:${(_horaInicio?.minute ?? 0).toString().padLeft(2, '0')}:00';
 
@@ -263,7 +297,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
       String horaFinStr;
 
       if (_fechaFin != null && _horaFin != null) {
-        // 1. El usuario SÍ especificó una hora de fin
         fechaHoraFin = DateTime(
           _fechaFin!.year,
           _fechaFin!.month,
@@ -274,17 +307,57 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         horaFinStr =
             '${_horaFin!.hour.toString().padLeft(2, '0')}:${_horaFin!.minute.toString().padLeft(2, '0')}:00';
       } else {
-        // 2. El usuario NO especificó una hora de fin
-        // WORKAROUND: Usamos la hora de inicio para evitar el bug de Velneo
-        fechaHoraFin = fechaHoraInicio; // Usar el DateTime de INICIO
-        horaFinStr = horaInicioStr; // Usar el String de HORA de INICIO
+        fechaHoraFin = fechaHoraInicio;
+        horaFinStr = horaInicioStr;
       }
 
       // ==================================================
-      // == 🟢 FIN DE LA CORRECCIÓN (FORMATO Y WORKAROUND) ==
+      // == 🟢 3. LÓGICA DE GUARDADO (BASADA EN EL TRIGGER) ==
       // ==================================================
 
-      // Preparar datos actualizados
+      String? fechaProximaStr;
+      String? horaProximaStr;
+      bool noGenProVis;
+      bool noGenTri;
+
+      if (_visitaCerrada) {
+        // --- CASO 1: VISITA CERRADA ---
+        DebugLogger.log('📦 Lógica: Visita Cerrada');
+
+        noGenProVis = true; // Como pide el trigger para cerrar
+        noGenTri = true; // MODO SEGURO: Evita el bug 1925
+
+        fechaProximaStr = null;
+        horaProximaStr = null;
+      } else {
+        // --- CASO 2: VISITA ABIERTA ---
+        DebugLogger.log('📦 Lógica: Visita Abierta');
+        noGenProVis = false; // Como pide el trigger para generar
+        noGenTri = false; // Para que entre en el trigger
+
+        // Si el usuario PUSO fecha/hora, las usamos
+        if (_fechaProximaVisita != null && _horaProximaVisita != null) {
+          DebugLogger.log('📦 ...usando fecha/hora manual');
+          // --- CORRECCIÓN DE FORMATO ---
+          fechaProximaStr = _fechaProximaVisita!.toIso8601String().split(
+            'T',
+          )[0]; // "YYYY-MM-DD"
+          horaProximaStr =
+              '${_horaProximaVisita!.hour.toString().padLeft(2, '0')}:${_horaProximaVisita!.minute.toString().padLeft(2, '0')}:00'; // "HH:MM:SS"
+        } else {
+          // Si el usuario NO PUSO fecha/hora, las calculamos NOSOTROS
+          DebugLogger.log('📦 ...calculando fecha/hora por defecto (hoy + 60)');
+          final fechaDefecto = DateTime.now().add(const Duration(days: 60));
+
+          fechaProximaStr = fechaDefecto.toIso8601String().split(
+            'T',
+          )[0]; // "YYYY-MM-DD"
+          horaProximaStr = "09:00:00"; // Hora por defecto
+        }
+      }
+
+      // ==================================================
+
       final visitaActualizada = {
         'id': widget.visita['id'],
         'nombre': widget.visita['nombre'] ?? '',
@@ -302,11 +375,15 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         'lead_id': widget.visita['lead_id'] ?? 0,
         'presupuesto_id': widget.visita['presupuesto_id'] ?? 0,
         'generado': widget.visita['generado'] ?? 1,
-        'sincronizado': 1, // Marcar como sincronizado
+        'sincronizado': 1,
+
+        // --- Campos de Próxima Visita (AÑADIDOS Y CORREGIDOS) ---
+        'fecha_proxima_visita': fechaProximaStr,
+        'hora_proxima_visita': horaProximaStr,
+        'no_gen_pro_vis': noGenProVis, // <-- Condicional
+        'no_gen_tri': noGenTri, // <-- Condicional
       };
 
-      // ==================================================
-      // == 🟢 INICIO DE LA CORRECCIÓN (LLAMADA API) ==
       // ==================================================
 
       final prefs = await SharedPreferences.getInstance();
@@ -340,10 +417,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
 
       DebugLogger.log('📥 ===== RESPUESTA actualizarVisitaAgenda =====');
       DebugLogger.log('✅ Visita #${resultado['id']} actualizada en Velneo');
-
-      // ==================================================
-      // == 🟢 FIN DE LA CORRECCIÓN (LLAMADA API) ==
-      // ==================================================
 
       // Actualizar en base de datos local
       final database = await db.database;
@@ -436,43 +509,22 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Editar Visita')),
-      body:
-          !_datosListos // ← CAMBIAR ESTA CONDICIÓN
+      body: !_datosListos
           ? const Center(child: CircularProgressIndicator())
           : _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Guardando cambios en Velneo...'),
+                ],
+              ),
+            )
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // Banner de sincronización
-                if (widget.visita['sincronizado'] == 1)
-                  Card(
-                    color: const Color(0xFFE3F2FD),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.info_outline,
-                            color: Color(0xFF032458),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Esta visita está sincronizada con Velneo. Al editarla se marcará como pendiente de sincronización.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.blue[900],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 16),
-
-                // Asunto
                 TextField(
                   controller: _asuntoController,
                   decoration: const InputDecoration(
@@ -483,8 +535,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                   maxLines: 1,
                 ),
                 const SizedBox(height: 16),
-
-                // Cliente
                 Card(
                   child: ListTile(
                     title: Text(
@@ -504,8 +554,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // Tipo de visita
                 if (_tiposVisita.isNotEmpty)
                   DropdownButtonFormField<int>(
                     value: _tipoVisita,
@@ -529,8 +577,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                     },
                   ),
                 const SizedBox(height: 16),
-
-                // Campaña comercial
                 DropdownButtonFormField<int?>(
                   value: _campanaSeleccionada,
                   decoration: const InputDecoration(
@@ -560,8 +606,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-
-                // Todo el día
                 SwitchListTile(
                   title: const Text('Todo el día'),
                   value: _todoDia,
@@ -571,8 +615,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                   activeColor: const Color(0xFF032458),
                 ),
                 const SizedBox(height: 16),
-
-                // Fecha y hora inicio
                 Card(
                   child: Column(
                     children: [
@@ -593,8 +635,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // Fecha y hora fin
                 Card(
                   child: Column(
                     children: [
@@ -616,6 +656,63 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                 ),
                 const SizedBox(height: 16),
 
+                // ==================================================
+                // == 🟢 5. INTERRUPTOR "VISITA CERRADA" AÑADIDO ==
+                // ==================================================
+                SwitchListTile(
+                  title: const Text('Visita Cerrada'),
+                  subtitle: Text(
+                    _visitaCerrada
+                        ? 'No se generará una próxima visita.'
+                        : 'Se generará una próxima visita (automática o manual).',
+                  ),
+                  value: _visitaCerrada,
+                  onChanged: (value) {
+                    setState(() => _visitaCerrada = value);
+                  },
+                  activeColor: const Color(0xFF032458),
+                ),
+                const SizedBox(height: 16),
+
+                // ==================================================
+                // == 🟢 6. PRÓXIMA VISITA (AHORA CONDICIONAL) ==
+                // ==================================================
+                if (!_visitaCerrada)
+                  Card(
+                    child: Column(
+                      children: [
+                        ListTile(
+                          title: const Text('Fecha Próxima Visita (opcional)'),
+                          subtitle: Text(_formatearFecha(_fechaProximaVisita)),
+                          trailing: const Icon(Icons.calendar_today),
+                          onTap: () =>
+                              _seleccionarFecha(false, esProxima: true),
+                        ),
+                        if (!_todoDia)
+                          ListTile(
+                            title: const Text('Hora Próxima Visita (opcional)'),
+                            subtitle: Text(_formatearHora(_horaProximaVisita)),
+                            trailing: const Icon(Icons.access_time),
+                            onTap: () =>
+                                _seleccionarHora(false, esProxima: true),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Text(
+                            'Si dejas estos campos vacíos, se programará una visita automática en 60 días.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // ==================================================
+                const SizedBox(height: 16),
+
                 // Descripción
                 TextField(
                   controller: _descripcionController,
@@ -630,7 +727,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
 
                 // Botón guardar
                 ElevatedButton.icon(
-                  onPressed: _guardarCambios,
+                  onPressed: _isLoading || _guardando ? null : _guardarCambios,
                   icon: const Icon(Icons.save),
                   label: const Text('GUARDAR CAMBIOS'),
                   style: ElevatedButton.styleFrom(
@@ -640,7 +737,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Los cambios se sincronizarán con Velneo al pulsar el botón de sincronizar',
+                  'Los cambios se sincronizarán automáticamente con Velneo',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 ),

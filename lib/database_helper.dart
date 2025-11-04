@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as path_helper;
+import 'screens/debug_logs_screen.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -768,6 +769,12 @@ class DatabaseHelper {
   Future<void> limpiarAgenda() async {
     final db = await database;
     await db.delete('agenda');
+  }
+
+  Future<int> eliminarVisita(int id) async {
+    final db = await database;
+    DebugLogger.log('🗑️ DB: Eliminando visita local #$id');
+    return await db.delete('agenda', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> limpiarPoblaciones() async {

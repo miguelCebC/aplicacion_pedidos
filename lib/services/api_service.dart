@@ -887,7 +887,8 @@ class VelneoAPIService {
         'fch_ini': visita['fecha_inicio'],
         'dsc': visita['descripcion'] ?? '',
         'tod_dia': visita['todo_dia'] == 1,
-        'no_gen_tri': true,
+        'no_gen_tri': visita['no_gen_tri'] ?? false,
+        'no_gen_pro_vis': visita['no_gen_pro_vis'] ?? false,
       };
 
       if (visita['hora_inicio'] != null &&
@@ -901,6 +902,14 @@ class VelneoAPIService {
       if (visita['hora_fin'] != null &&
           visita['hora_fin'].toString().isNotEmpty) {
         visitaVelneo['hor_fin'] = visita['hora_fin'];
+      }
+      if (visita['fecha_proxima_visita'] != null &&
+          visita['fecha_proxima_visita'].toString().isNotEmpty) {
+        visitaVelneo['fch_pro_vis'] = visita['fecha_proxima_visita'];
+      }
+      if (visita['hora_proxima_visita'] != null &&
+          visita['hora_proxima_visita'].toString().isNotEmpty) {
+        visitaVelneo['hor_pro_vis'] = visita['hora_proxima_visita'];
       }
       if (visita['campana_id'] != null && visita['campana_id'] != 0) {
         visitaVelneo['crm_cam_com'] = visita['campana_id'];
@@ -1010,6 +1019,26 @@ class VelneoAPIService {
           visita['hora_fin'].toString().isNotEmpty) {
         visitaVelneo['hor_fin'] = visita['hora_fin'];
       }
+      if (visita['fecha_proxima_visita'] != null &&
+          visita['fecha_proxima_visita'].toString().isNotEmpty) {
+        visitaVelneo['fch_pro_vis'] = visita['fecha_proxima_visita'];
+      }
+      if (visita['hora_proxima_visita'] != null &&
+          visita['hora_proxima_visita'].toString().isNotEmpty) {
+        visitaVelneo['hor_pro_vis'] = visita['hora_proxima_visita'];
+      }
+      visitaVelneo['no_gen_pro_vis'] = visita['no_gen_pro_vis'];
+      visitaVelneo['no_gen_tri'] = visita['no_gen_tri'];
+      if (visita['fecha_proxima_visita'] != null &&
+          visita['fecha_proxima_visita'].toString().isNotEmpty) {
+        visitaVelneo['fch_pro_vis'] = visita['fecha_proxima_visita'];
+      }
+      if (visita['hora_proxima_visita'] != null &&
+          visita['hora_proxima_visita'].toString().isNotEmpty) {
+        visitaVelneo['hor_pro_vis'] = visita['hora_proxima_visita'];
+      }
+      visitaVelneo['no_gen_pro_vis'] = visita['no_gen_pro_vis'];
+      visitaVelneo['no_gen_tri'] = visita['no_gen_tri'];
       if (visita['campana_id'] != null && visita['campana_id'] != 0) {
         visitaVelneo['crm_cam_com'] = visita['campana_id'];
       }
@@ -1073,8 +1102,52 @@ class VelneoAPIService {
       httpClient.close();
     }
   }
+  // ... (después de actualizarVisitaAgenda) ...
 
-  // ... (el resto de api_service.dart) ...
+  Future<bool> deleteVisitaAgenda(String visitaId) async {
+    final httpClient = HttpClient()
+      ..badCertificateCallback =
+          ((X509Certificate cert, String host, int port) => true)
+      ..connectionTimeout = const Duration(seconds: 30);
+
+    try {
+      DebugLogger.log('🗑️ API: Eliminando visita #$visitaId');
+
+      // Usamos DELETE y el endpoint /CRM_AGE/{id}
+      final request = await httpClient
+          .deleteUrl(Uri.parse(_buildUrl('/CRM_AGE/$visitaId')))
+          .timeout(const Duration(seconds: 30));
+
+      request.headers.set('Accept', 'application/json');
+      request.headers.set('User-Agent', 'Flutter App');
+
+      final response = await request.close().timeout(
+        const Duration(seconds: 30),
+      );
+      final stringData = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 10));
+
+      DebugLogger.log('📥 API: Status ${response.statusCode}');
+      DebugLogger.log('📥 API: Respuesta: $stringData');
+
+      // DELETE exitoso a veces devuelve 200 (con contenido) o 204 (sin contenido)
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        DebugLogger.log('✅ API: Visita #$visitaId eliminada');
+        return true;
+      }
+
+      DebugLogger.log('❌ API: Error HTTP ${response.statusCode}');
+      throw Exception('Error HTTP ${response.statusCode}');
+    } catch (e) {
+      DebugLogger.log('❌ API: Excepción - $e');
+      rethrow;
+    } finally {
+      httpClient.close();
+    }
+  }
+
   Future<bool> probarConexion() async {
     try {
       final url = _buildUrl('/ART_M');

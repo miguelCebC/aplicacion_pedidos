@@ -335,12 +335,6 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
                                 'No hay eventos para este día',
                                 style: TextStyle(color: Colors.grey),
                               ),
-                              const SizedBox(height: 16),
-                              ElevatedButton.icon(
-                                onPressed: _crearNuevaVisita,
-                                icon: const Icon(Icons.add),
-                                label: const Text('Crear Visita'),
-                              ),
                             ],
                           ),
                         )
@@ -353,7 +347,7 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
                               margin: const EdgeInsets.only(bottom: 8),
                               child: InkWell(
                                 onTap: () async {
-                                  await Navigator.push(
+                                  final resultado = await Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) =>
@@ -423,13 +417,6 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
                 ),
               ],
             ),
-      floatingActionButton: _comercialId != null
-          ? FloatingActionButton(
-              onPressed: _crearNuevaVisita,
-              backgroundColor: const Color(0xFF032458),
-              child: const Icon(Icons.add),
-            )
-          : null,
     );
   }
 }

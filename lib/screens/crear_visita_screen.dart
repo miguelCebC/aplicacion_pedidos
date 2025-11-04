@@ -26,9 +26,17 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   TimeOfDay _horaInicio = TimeOfDay.now();
   DateTime? _fechaFin;
   TimeOfDay? _horaFin;
+  DateTime? _fechaProximaVisita;
+  TimeOfDay? _horaProximaVisita;
   bool _todoDia = false;
   bool _isLoading = false;
-  bool _guardando = false; // ← AÑADIR ESTA LÍNEA
+  bool _guardando = false;
+
+  // ==================================================
+  // == 🟢 1. "VISITA CERRADA" AÑADIDO ==
+  // Por defecto 'false' para que el usuario decida
+  // ==================================================
+  bool _visitaCerrada = false;
 
   List<Map<String, dynamic>> _tiposVisita = [];
   List<Map<String, dynamic>> _campanas = [];
@@ -53,7 +61,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       _tiposVisita = tiposVisita;
       _campanas = campanas;
 
-      // Seleccionar primer tipo por defecto
       if (_tiposVisita.isNotEmpty) {
         _tipoVisita = _tiposVisita.first['id'];
       }
@@ -70,12 +77,18 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     }
   }
 
-  Future<void> _seleccionarFecha(bool esInicio) async {
+  Future<void> _seleccionarFecha(
+    bool esInicio, {
+    bool esProxima = false,
+  }) async {
     final fecha = await showDatePicker(
       context: context,
       initialDate: esInicio
           ? (_fechaInicio ?? DateTime.now())
-          : (_fechaFin ?? DateTime.now()),
+          : (esProxima
+                ? (_fechaProximaVisita ??
+                      DateTime.now().add(const Duration(days: 60)))
+                : (_fechaFin ?? DateTime.now())),
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
       locale: const Locale('es', 'ES'),
@@ -85,6 +98,8 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       setState(() {
         if (esInicio) {
           _fechaInicio = fecha;
+        } else if (esProxima) {
+          _fechaProximaVisita = fecha;
         } else {
           _fechaFin = fecha;
         }
@@ -92,16 +107,22 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     }
   }
 
-  Future<void> _seleccionarHora(bool esInicio) async {
+  Future<void> _seleccionarHora(bool esInicio, {bool esProxima = false}) async {
     final hora = await showTimePicker(
       context: context,
-      initialTime: esInicio ? _horaInicio : (_horaFin ?? TimeOfDay.now()),
+      initialTime: esInicio
+          ? _horaInicio
+          : (esProxima
+                ? (_horaProximaVisita ?? const TimeOfDay(hour: 9, minute: 0))
+                : (_horaFin ?? TimeOfDay.now())),
     );
 
     if (hora != null) {
       setState(() {
         if (esInicio) {
           _horaInicio = hora;
+        } else if (esProxima) {
+          _horaProximaVisita = hora;
         } else {
           _horaFin = hora;
         }
@@ -120,21 +141,15 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   }
 
   Future<void> _guardarVisita() async {
-    // Protección contra doble clic
     if (_guardando) {
       DebugLogger.log('⚠️ BLOQUEADO: Ya se está guardando una visita');
       return;
     }
 
-    // Generar ID único para esta ejecución
     final ejecutionId = DateTime.now().millisecondsSinceEpoch;
 
     DebugLogger.log(
       '🚀 ========== INICIO _guardarVisita (ID: $ejecutionId) ==========',
-    );
-
-    DebugLogger.log(
-      '🚀 Stack trace: ${StackTrace.current.toString().substring(0, 200)}',
     );
 
     if (_asuntoController.text.isEmpty) {
@@ -144,7 +159,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       ).showSnackBar(const SnackBar(content: Text('El asunto es obligatorio')));
       return;
     }
-
     if (_clienteSeleccionado == null) {
       DebugLogger.log('❌ Cliente no seleccionado');
       ScaffoldMessenger.of(
@@ -152,7 +166,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       ).showSnackBar(const SnackBar(content: Text('Selecciona un cliente')));
       return;
     }
-
     if (_comercialId == null) {
       DebugLogger.log('❌ Comercial no configurado');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -162,7 +175,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       );
       return;
     }
-
     if (_tipoVisita == null) {
       DebugLogger.log('❌ Tipo de visita no seleccionado');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -173,19 +185,10 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
     setState(() {
       _isLoading = true;
-      _guardando = true; // ← MARCAR COMO GUARDANDO
+      _guardando = true;
     });
 
     try {
-      TimeOfDay horaInicioFinal = _horaInicio;
-
-      // ... (dentro de _guardarVisita)
-
-      DebugLogger.log('📅 Fecha inicio: ${_fechaInicio!.toString()}');
-      DebugLogger.log(
-        '⏰ Hora inicio: ${_horaInicio.hour}:${_horaInicio.minute}',
-      );
-
       final fechaHoraInicio = DateTime(
         _fechaInicio!.year,
         _fechaInicio!.month,
@@ -194,18 +197,12 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         _horaInicio.minute,
       );
 
-      // ==================================================
-      // == 🟢 INICIO DE LA CORRECCIÓN ==
-      // ==================================================
-
-      // Formatear la HORA INICIO como "HH:MM:SS"
       final String horaInicioStr =
           '${_horaInicio.hour.toString().padLeft(2, '0')}:${_horaInicio.minute.toString().padLeft(2, '0')}:00';
       DateTime fechaHoraFin;
       String horaFinStr;
 
       if (_fechaFin != null && _horaFin != null) {
-        // 1. El usuario SÍ especificó una hora de fin
         fechaHoraFin = DateTime(
           _fechaFin!.year,
           _fechaFin!.month,
@@ -215,52 +212,95 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         );
         horaFinStr =
             '${_horaFin!.hour.toString().padLeft(2, '0')}:${_horaFin!.minute.toString().padLeft(2, '0')}:00';
-
-        DebugLogger.log(
-          '📅 Fecha-hora fin (especificada): ${fechaHoraFin.toIso8601String()}',
-        );
       } else {
-        // 2. El usuario NO especificó una hora de fin
-        // WORKAROUND: Usamos la hora de inicio para evitar el bug de Velneo
-        fechaHoraFin = fechaHoraInicio; // Usar el DateTime de INICIO
-        horaFinStr = horaInicioStr; // Usar el String de HORA de INICIO
-
-        DebugLogger.log(
-          '📅 Fecha-hora fin (auto-completada): ${fechaHoraFin.toIso8601String()}',
-        );
+        fechaHoraFin = fechaHoraInicio;
+        horaFinStr = horaInicioStr;
       }
+
+      // ==================================================
+      // == 🟢 2. LÓGICA DE GUARDADO (BASADA EN EL TRIGGER) ==
+      // ==================================================
+
+      String? fechaProximaStr;
+      String? horaProximaStr;
+      bool noGenProVis;
+      bool noGenTri;
+
+      if (_visitaCerrada) {
+        // --- CASO 1: VISITA CERRADA ---
+        // El usuario ha marcado "Visita Cerrada"
+        DebugLogger.log('📦 Lógica: Visita Cerrada');
+
+        noGenProVis = true; // Como pide el trigger para cerrar
+        noGenTri = true; // MODO SEGURO: Evita el bug 1925
+
+        fechaProximaStr = null;
+        horaProximaStr = null;
+      } else {
+        // --- CASO 2: VISITA ABIERTA ---
+        DebugLogger.log('📦 Lógica: Visita Abierta');
+        noGenProVis = false; // Como pide el trigger para generar
+        noGenTri = false; // Para que entre en el trigger
+
+        // Si el usuario PUSO fecha/hora, las usamos
+        if (_fechaProximaVisita != null && _horaProximaVisita != null) {
+          DebugLogger.log('📦 ...usando fecha/hora manual');
+          // --- CORRECCIÓN DE FORMATO ---
+          fechaProximaStr = _fechaProximaVisita!.toIso8601String().split(
+            'T',
+          )[0]; // "YYYY-MM-DD"
+          horaProximaStr =
+              '${_horaProximaVisita!.hour.toString().padLeft(2, '0')}:${_horaProximaVisita!.minute.toString().padLeft(2, '0')}:00'; // "HH:MM:SS"
+        } else {
+          // Si el usuario NO PUSO fecha/hora, las calculamos NOSOTROS
+          // para evitar el bug de addDays() en Velneo.
+          DebugLogger.log('📦 ...calculando fecha/hora por defecto (hoy + 60)');
+          final fechaDefecto = DateTime.now().add(const Duration(days: 60));
+
+          fechaProximaStr = fechaDefecto.toIso8601String().split(
+            'T',
+          )[0]; // "YYYY-MM-DD"
+          horaProximaStr = "09:00:00"; // Hora por defecto
+        }
+      }
+
+      // ==================================================
+
       DebugLogger.log(
         '📅 Fecha-hora construida: ${fechaHoraInicio.toIso8601String()}',
       );
 
+      // ==================================================
+      // == 🟢 3. MAPA VISITADATA (CON CAMPOS CORREGIDOS) ==
+      // ==================================================
       final visitaData = {
         'cliente_id': _clienteSeleccionado!['id'],
         'tipo_visita': _tipoVisita,
         'asunto': _asuntoController.text,
         'comercial_id': _comercialId,
         'campana_id': _campanaSeleccionada ?? 0,
-        'fecha_inicio': fechaHoraInicio
-            .toIso8601String(), // Correcto: Fecha/Hora completa
-        'hora_inicio': horaInicioStr, // Corregido: "HH:MM:SS"
-        'fecha_fin': fechaHoraFin
-            ?.toIso8601String(), // Correcto: Fecha/Hora completa (o null)
-        'hora_fin': horaFinStr, // Corregido: "HH:MM:SS" (o null)
+        'fecha_inicio': fechaHoraInicio.toIso8601String(),
+        'hora_inicio': horaInicioStr,
+        'fecha_fin': fechaHoraFin.toIso8601String(),
+        'hora_fin': horaFinStr,
         'descripcion': _descripcionController.text,
         'todo_dia': _todoDia ? 1 : 0,
         'lead_id': 0,
         'presupuesto_id': 0,
-        'generado': 0,
+        'generado': 1, // <-- CORREGIDO A 1 (estaba en 0)
+        // --- Campos de Próxima Visita (AÑADIDOS Y CORREGIDOS) ---
+        'fecha_proxima_visita': fechaProximaStr, // <-- SÓLO FECHA "YYYY-MM-DD"
+        'hora_proxima_visita': horaProximaStr, // <-- SÓLO HORA "HH:MM:SS"
+        'no_gen_pro_vis': noGenProVis, // <-- Condicional
+        'no_gen_tri': noGenTri, // <-- Condicional
       };
 
-      // ==================================================
-      // == 🟢 FIN DE LA CORRECCIÓN ==
       // ==================================================
 
       DebugLogger.log(
         '📦 Datos preparados: Cliente=${visitaData['cliente_id']}, Tipo=${visitaData['tipo_visita']}',
       );
-      // ... (resto de la función)
-      // ... (resto de la función)
+
       final prefs = await SharedPreferences.getInstance();
       String url = prefs.getString('velneo_url') ?? '';
       final String apiKey = prefs.getString('velneo_api_key') ?? '';
@@ -300,38 +340,22 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         throw Exception('No se recibió ID de Velneo');
       }
 
-      DebugLogger.log('🔄 Sincronizando agenda del comercial $_comercialId...');
+      DebugLogger.log('💾 Guardando visita #$idVelneo en BD local...');
       final db = DatabaseHelper.instance;
 
       final visitaLocal = Map<String, dynamic>.from(visitaData);
       visitaLocal['id'] = idVelneo;
-      visitaLocal['sincronizado'] = 1; // Marcar como sincronizado
+      visitaLocal['sincronizado'] = 1;
 
       try {
-        // Usamos insertarAgendasLote con un solo elemento y 'replace'
-        // para asegurar que se guarda/actualiza.
         await db.insertarAgendasLote([visitaLocal]);
-
         DebugLogger.log('✅ Visita #$idVelneo guardada en BD local');
-
-        final visitasEnBD = await db.obtenerAgenda(_comercialId);
-        final visitaNueva = visitasEnBD
-            .where((v) => v['id'] == idVelneo)
-            .toList();
-
-        if (visitaNueva.isNotEmpty) {
-          DebugLogger.log('✅ Verificado: Visita #$idVelneo encontrada en BD');
-        } else {
-          DebugLogger.log(
-            '⚠️ Verificado: Visita #$idVelneo NO encontrada en BD',
-          );
-        }
       } catch (e) {
         DebugLogger.log('❌ Error al guardar visita local: $e');
       }
       setState(() {
         _isLoading = false;
-        _guardando = false; // ← LIBERAR FLAG
+        _guardando = false;
       });
 
       if (!mounted) return;
@@ -361,7 +385,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     } catch (e, stackTrace) {
       setState(() {
         _isLoading = false;
-        _guardando = false; // ← LIBERAR FLAG EN CASO DE ERROR
+        _guardando = false;
       });
 
       DebugLogger.log('❌ ERROR CRÍTICO: $e');
@@ -431,18 +455,12 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   const CircularProgressIndicator(),
                   const SizedBox(height: 16),
                   const Text('Creando visita...'),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Intentando sincronizar con Velneo',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
                 ],
               ),
             )
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // Asunto
                 TextField(
                   controller: _asuntoController,
                   decoration: const InputDecoration(
@@ -453,8 +471,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   maxLines: 1,
                 ),
                 const SizedBox(height: 16),
-
-                // Cliente
                 Card(
                   child: ListTile(
                     title: Text(
@@ -474,8 +490,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // Tipo de visita
                 if (_tiposVisita.isNotEmpty)
                   DropdownButtonFormField<int>(
                     value: _tipoVisita,
@@ -484,14 +498,13 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.category),
                     ),
-                    isExpanded: true, // ← AÑADIR ESTA LÍNEA
+                    isExpanded: true,
                     items: _tiposVisita.map((tipo) {
                       return DropdownMenuItem<int>(
                         value: tipo['id'],
                         child: Text(
                           tipo['nombre'],
-                          overflow:
-                              TextOverflow.ellipsis, // ← AÑADIR ESTA LÍNEA
+                          overflow: TextOverflow.ellipsis,
                         ),
                       );
                     }).toList(),
@@ -510,8 +523,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                     ),
                   ),
                 const SizedBox(height: 16),
-
-                // Campaña comercial
                 DropdownButtonFormField<int?>(
                   value: _campanaSeleccionada,
                   decoration: const InputDecoration(
@@ -519,7 +530,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.campaign),
                   ),
-                  isExpanded: true, // ← AÑADIR ESTA LÍNEA
+                  isExpanded: true,
                   items: [
                     const DropdownMenuItem<int?>(
                       value: null,
@@ -531,7 +542,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                         child: Text(
                           campana['nombre'],
                           overflow: TextOverflow.ellipsis,
-                          maxLines: 2, // ← AÑADIR ESTA LÍNEA
+                          maxLines: 2,
                         ),
                       );
                     }).toList(),
@@ -541,8 +552,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-
-                // Todo el día
                 SwitchListTile(
                   title: const Text('Todo el día'),
                   value: _todoDia,
@@ -552,8 +561,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   activeColor: const Color(0xFF032458),
                 ),
                 const SizedBox(height: 16),
-
-                // Fecha y hora inicio
                 Card(
                   child: Column(
                     children: [
@@ -574,8 +581,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // Fecha y hora fin
                 Card(
                   child: Column(
                     children: [
@@ -597,6 +602,63 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                 ),
                 const SizedBox(height: 16),
 
+                // ==================================================
+                // == 🟢 4. INTERRUPTOR "VISITA CERRADA" AÑADIDO ==
+                // ==================================================
+                SwitchListTile(
+                  title: const Text('Visita Cerrada'),
+                  subtitle: Text(
+                    _visitaCerrada
+                        ? 'No se generará una próxima visita.'
+                        : 'Se generará una próxima visita (automática o manual).',
+                  ),
+                  value: _visitaCerrada,
+                  onChanged: (value) {
+                    setState(() => _visitaCerrada = value);
+                  },
+                  activeColor: const Color(0xFF032458),
+                ),
+                const SizedBox(height: 16),
+
+                // ==================================================
+                // == 🟢 5. PRÓXIMA VISITA (AHORA CONDICIONAL) ==
+                // ==================================================
+                if (!_visitaCerrada)
+                  Card(
+                    child: Column(
+                      children: [
+                        ListTile(
+                          title: const Text('Fecha Próxima Visita (opcional)'),
+                          subtitle: Text(_formatearFecha(_fechaProximaVisita)),
+                          trailing: const Icon(Icons.calendar_today),
+                          onTap: () =>
+                              _seleccionarFecha(false, esProxima: true),
+                        ),
+                        if (!_todoDia)
+                          ListTile(
+                            title: const Text('Hora Próxima Visita (opcional)'),
+                            subtitle: Text(_formatearHora(_horaProximaVisita)),
+                            trailing: const Icon(Icons.access_time),
+                            onTap: () =>
+                                _seleccionarHora(false, esProxima: true),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Text(
+                            'Si dejas estos campos vacíos, se programará una visita automática en 60 días.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // ==================================================
+                const SizedBox(height: 16),
+
                 // Descripción
                 TextField(
                   controller: _descripcionController,
@@ -611,9 +673,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
                 // Botón guardar
                 ElevatedButton.icon(
-                  onPressed: _isLoading || _guardando
-                      ? null
-                      : _guardarVisita, // ← CAMBIAR AQUÍ
+                  onPressed: _isLoading || _guardando ? null : _guardarVisita,
                   icon: const Icon(Icons.save),
                   label: const Text('CREAR VISITA'),
                   style: ElevatedButton.styleFrom(

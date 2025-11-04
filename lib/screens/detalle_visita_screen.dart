@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../database_helper.dart';
 import 'editar_visita_screen.dart';
+import 'debug_logs_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
 
 class DetalleVisitaScreen extends StatefulWidget {
   final Map<String, dynamic> visita;
@@ -140,6 +143,113 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
     }
   }
 
+  Future<void> _eliminarVisita() async {
+    // 1. Pedir confirmación
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Confirmar Eliminación'),
+        content: const Text(
+          '¿Estás seguro de que quieres eliminar esta visita?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) {
+      DebugLogger.log('🚫 Eliminación cancelada por el usuario');
+      return;
+    }
+
+    // Generar ID único para esta ejecución
+    final ejecutionId = DateTime.now().millisecondsSinceEpoch;
+    DebugLogger.log(
+      '🚀 ========== INICIO _eliminarVisita (ID: $ejecutionId) ==========',
+    );
+
+    setState(() => _isLoading = true);
+
+    try {
+      // 2. Conectar a la API
+      final prefs = await SharedPreferences.getInstance();
+      String url = prefs.getString('velneo_url') ?? '';
+      final String apiKey = prefs.getString('velneo_api_key') ?? '';
+
+      if (url.isEmpty || apiKey.isEmpty) {
+        throw Exception('Configura la URL y API Key en Configuración');
+      }
+
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://$url';
+      }
+
+      final apiService = VelneoAPIService(url, apiKey);
+      final String visitaIdVelneo = widget.visita['id'].toString();
+
+      // 3. Llamar a la API para eliminar en Velneo
+      await apiService
+          .deleteVisitaAgenda(visitaIdVelneo)
+          .timeout(
+            const Duration(seconds: 45),
+            onTimeout: () {
+              DebugLogger.log('❌ TIMEOUT (ID: $ejecutionId)');
+              throw Exception('Timeout: El servidor tardó más de 45 segundos');
+            },
+          );
+      DebugLogger.log('✅ Visita #$visitaIdVelneo eliminada de Velneo');
+
+      // 4. Eliminar de la base de datos local
+      final db = DatabaseHelper.instance;
+      await db.eliminarVisita(widget.visita['id']);
+      DebugLogger.log('✅ Visita #${widget.visita['id']} eliminada de BD local');
+
+      setState(() => _isLoading = false);
+
+      if (!mounted) return;
+
+      DebugLogger.log('✅ ========== FIN _eliminarVisita ==========');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Visita eliminada'),
+          backgroundColor: Color(0xFF032458),
+        ),
+      );
+
+      // 5. Volver al calendario (devolviendo 'true' para refrescar)
+      Navigator.pop(context, true);
+    } catch (e) {
+      setState(() => _isLoading = false);
+      DebugLogger.log('❌ ERROR CRÍTICO al eliminar: $e');
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Error al eliminar visita'),
+          content: Text(e.toString()),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -151,6 +261,13 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
             onPressed: () {
               _editarVisita();
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete),
+            onPressed: () {
+              _eliminarVisita();
+            },
+            tooltip: 'Eliminar visita',
           ),
         ],
       ),
@@ -279,6 +396,26 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
                               _buildInfoRow(
                                 'Hora Fin',
                                 _formatearHora(widget.visita['hora_fin']),
+                              ),
+                            if (widget.visita['fecha_proxima_visita'] != null &&
+                                widget.visita['fecha_proxima_visita']
+                                    .toString()
+                                    .isNotEmpty)
+                              _buildInfoRow(
+                                'Próxima Visita',
+                                _formatearFecha(
+                                  widget.visita['fecha_proxima_visita'],
+                                ),
+                              ),
+                            if (widget.visita['hora_proxima_visita'] != null &&
+                                widget.visita['hora_proxima_visita']
+                                    .toString()
+                                    .isNotEmpty)
+                              _buildInfoRow(
+                                'Hora Próxima',
+                                _formatearHora(
+                                  widget.visita['hora_proxima_visita'],
+                                ),
                               ),
                             if (widget.visita['fecha_proxima_visita'] != null)
                               _buildInfoRow(
