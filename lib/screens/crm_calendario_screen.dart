@@ -4,7 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import 'detalle_visita_screen.dart';
 import 'crear_visita_screen.dart';
+import 'leads_screen.dart';
+import 'presupuestos_screen.dart';
 import '../services/api_service.dart';
+import 'presupuestos_screen.dart';
 
 class CRMCalendarioScreen extends StatefulWidget {
   const CRMCalendarioScreen({Key? key}) : super(key: key);
@@ -13,7 +16,6 @@ class CRMCalendarioScreen extends StatefulWidget {
   State<CRMCalendarioScreen> createState() => _CRMCalendarioScreenState();
 }
 
-// 🟢 1. Se añade 'with AutomaticKeepAliveClientMixin' para mantener viva la pestaña
 class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
     with AutomaticKeepAliveClientMixin {
   CalendarFormat _calendarFormat = CalendarFormat.month;
@@ -27,9 +29,11 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
   bool _sincronizando = false;
   int _visitasPendientes = 0;
 
-  // 🟢 2. Se añade la propiedad 'wantKeepAlive'
+  // Mapa para cachear nombres de clientes
+  Map<int, String> _clientesNombres = {};
+
   @override
-  bool get wantKeepAlive => true; // Esto mantiene el estado de la pestaña
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -50,10 +54,6 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
     });
 
     if (comercialId != null) {
-      // 🟢 3. MODIFICADO:
-      // Ya no llamamos a _sincronizarVisitas() aquí.
-      // Solo cargamos los eventos de la base de datos local.
-      // La sincronización de red ya la hace 'main.dart' en segundo plano.
       await _cargarEventos();
     } else {
       setState(() => _isLoading = false);
@@ -68,6 +68,13 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
     final db = DatabaseHelper.instance;
     final agendas = await db.obtenerAgenda(_comercialId);
     final pendientes = await db.contarAgendasPendientes(_comercialId);
+
+    // Cargar todos los clientes para cachear sus nombres
+    final clientes = await db.obtenerClientes();
+    _clientesNombres.clear();
+    for (var cliente in clientes) {
+      _clientesNombres[cliente['id'] as int] = cliente['nombre'] as String;
+    }
 
     final Map<DateTime, List<Map<String, dynamic>>> eventosAgrupados = {};
 
@@ -110,23 +117,34 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
   }
 
   String _formatearHora(String? horaStr) {
-    if (horaStr == null || horaStr.isEmpty) return '';
+    if (horaStr == null || horaStr.isEmpty) return '--:--';
     try {
-      // Controlar el formato de hora que viene de Velneo (ej. "9:0:0")
+      // Primero intentar parsear como fecha completa ISO
+      if (horaStr.contains('T') || horaStr.contains('-')) {
+        final dt = DateTime.parse(horaStr);
+        return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      }
+
+      // Si es formato "HH:MM:SS" o "HH:MM"
       if (horaStr.contains(':')) {
         final parts = horaStr.split(':');
-        final hora = int.parse(parts[0]).toString().padLeft(2, '0');
-        final minuto = int.parse(parts[1]).toString().padLeft(2, '0');
-        return '$hora:$minuto';
+        if (parts.length >= 2) {
+          final hora = int.parse(parts[0]).toString().padLeft(2, '0');
+          final minuto = int.parse(parts[1]).toString().padLeft(2, '0');
+          return '$hora:$minuto';
+        }
       }
-      // Si es una fecha completa (ej. guardado local)
-      final dt = DateTime.parse(horaStr);
-      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+      return '--:--';
     } catch (e) {
-      // Fallback por si el formato es inesperado
-      if (horaStr.length > 5) return horaStr.substring(0, 5);
-      return horaStr;
+      print('⚠️ Error formateando hora: $horaStr - $e');
+      return '--:--';
     }
+  }
+
+  String _obtenerNombreCliente(int? clienteId) {
+    if (clienteId == null) return 'Sin cliente';
+    return _clientesNombres[clienteId] ?? 'Cliente desconocido';
   }
 
   Future<void> _crearNuevaVisita() async {
@@ -139,19 +157,16 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
     );
 
     if (resultado == true) {
-      // Recargar eventos después de crear (desde la BD local)
       await _cargarEventos();
     }
   }
 
-  // Esta función se mantiene para el botón de refresco manual
   Future<void> _sincronizarVisitas() async {
     if (_comercialId == null) {
       setState(() => _isLoading = false);
       return;
     }
 
-    // Evitar sincronizaciones múltiples si ya hay una en curso
     if (_sincronizando) return;
 
     setState(() => _sincronizando = true);
@@ -170,13 +185,12 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
       }
 
       print(
-        '🔄 Sincronizando agenda del comercial $_comercialId desde Velneo...',
+        '📄 Sincronizando agenda del comercial $_comercialId desde Velneo...',
       );
 
       final apiService = VelneoAPIService(url, apiKey);
       final db = DatabaseHelper.instance;
 
-      // Limpiar y recargar agenda del comercial
       await db.limpiarAgenda();
       final visitasComercial = await apiService.obtenerAgenda(_comercialId);
       await db.insertarAgendasLote(
@@ -186,11 +200,10 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
       print('✅ Agenda sincronizada: ${visitasComercial.length} visitas');
 
       setState(() => _sincronizando = false);
-      await _cargarEventos(); // Carga los datos recién descargados
+      await _cargarEventos();
 
       if (!mounted) return;
 
-      // Solo mostrar mensaje si es sincronización manual (no al abrir)
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('✅ ${visitasComercial.length} visitas sincronizadas'),
@@ -218,8 +231,7 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
 
   @override
   Widget build(BuildContext context) {
-    // 🟢 4. Se añade 'super.build(context)'
-    super.build(context); // Requerido por AutomaticKeepAliveClientMixin
+    super.build(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -231,6 +243,47 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
           ],
         ),
         actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'Más opciones',
+            onSelected: (value) {
+              if (value == 'leads') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LeadsScreen()),
+                );
+              } else if (value == 'presupuestos') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const PresupuestosScreen(),
+                  ),
+                );
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'leads',
+                child: Row(
+                  children: [
+                    Icon(Icons.contact_page, color: Color(0xFF032458)),
+                    SizedBox(width: 12),
+                    Text('Leads'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'presupuestos',
+                child: Row(
+                  children: [
+                    Icon(Icons.request_quote, color: Color(0xFF032458)),
+                    SizedBox(width: 12),
+                    Text('Presupuestos'),
+                  ],
+                ),
+              ),
+            ],
+          ),
           IconButton(
             icon: _sincronizando
                 ? const SizedBox(
@@ -263,7 +316,8 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
                   const SizedBox(height: 8),
                   ElevatedButton(
                     onPressed: () {
-                      DefaultTabController.of(context)?.animateTo(3);
+                      // Navegar a configuración (índice 3)
+                      // Necesitarás ajustar esto según tu implementación
                     },
                     child: const Text('Ir a Configuración'),
                   ),
@@ -282,11 +336,6 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
                   locale: 'es_ES',
                   startingDayOfWeek: StartingDayOfWeek.monday,
                   calendarStyle: const CalendarStyle(
-                    markersMaxCount: 1,
-                    markerDecoration: BoxDecoration(
-                      color: Color(0xFF032458),
-                      shape: BoxShape.circle,
-                    ),
                     todayDecoration: BoxDecoration(
                       color: Color(0xFF162846),
                       shape: BoxShape.circle,
@@ -295,10 +344,10 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
                       color: Color(0xFF032458),
                       shape: BoxShape.circle,
                     ),
-                  ),
-                  headerStyle: const HeaderStyle(
-                    formatButtonVisible: true,
-                    titleCentered: true,
+                    markerDecoration: BoxDecoration(
+                      color: Color(0xFF032458),
+                      shape: BoxShape.circle,
+                    ),
                   ),
                   onDaySelected: (selectedDay, focusedDay) {
                     setState(() {
@@ -317,46 +366,19 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
                   },
                 ),
                 const Divider(height: 1),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Eventos del día (${_eventosDelDia.length})',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      ElevatedButton.icon(
-                        onPressed: _crearNuevaVisita,
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text('Nueva'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF032458),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
                 Expanded(
                   child: _eventosDelDia.isEmpty
                       ? Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(
+                            children: const [
+                              Icon(
                                 Icons.event_busy,
                                 size: 64,
                                 color: Colors.grey,
                               ),
-                              const SizedBox(height: 16),
-                              const Text(
+                              SizedBox(height: 16),
+                              Text(
                                 'No hay eventos para este día',
                                 style: TextStyle(color: Colors.grey),
                               ),
@@ -368,6 +390,12 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
                           itemCount: _eventosDelDia.length,
                           itemBuilder: (context, index) {
                             final evento = _eventosDelDia[index];
+                            final hora = _formatearHora(evento['hora_inicio']);
+                            final clienteId = evento['cliente_id'] as int?;
+                            final nombreCliente = _obtenerNombreCliente(
+                              clienteId,
+                            );
+
                             return Card(
                               margin: const EdgeInsets.only(bottom: 8),
                               child: InkWell(
@@ -379,22 +407,32 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
                                           DetalleVisitaScreen(visita: evento),
                                     ),
                                   );
-                                  // Si se borra o edita la visita, recargar
                                   if (resultado == true) {
                                     _cargarEventos();
                                   }
                                 },
                                 child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: const Color(0xFF032458),
-                                    child: Text(
-                                      _formatearHora(evento['hora_inicio']),
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
+                                  leading: Container(
+                                    width: 56,
+                                    height: 56,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: const Color(0xFF032458),
+                                        width: 2,
                                       ),
-                                      textAlign: TextAlign.center,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        hora,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          color: Color(0xFF032458),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
                                     ),
                                   ),
                                   title: Text(
@@ -403,41 +441,8 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                  subtitle: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      if (evento['descripcion'] != null &&
-                                          evento['descripcion']
-                                              .toString()
-                                              .isNotEmpty)
-                                        Text(
-                                          evento['descripcion'],
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'Cliente ID: ${evento['cliente_id']}',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  trailing: evento['todo_dia'] == 1
-                                      ? const Chip(
-                                          label: Text(
-                                            'Todo el día',
-                                            style: TextStyle(fontSize: 10),
-                                          ),
-                                          backgroundColor: Color(0xFFCAD3E2),
-                                        )
-                                      : const Icon(
-                                          Icons.arrow_forward_ios,
-                                          size: 16,
-                                        ),
+                                  subtitle: Text(nombreCliente),
+                                  trailing: const Icon(Icons.chevron_right),
                                 ),
                               ),
                             );
@@ -446,6 +451,13 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
                 ),
               ],
             ),
+      floatingActionButton: _comercialId != null
+          ? FloatingActionButton(
+              onPressed: _crearNuevaVisita,
+              backgroundColor: const Color(0xFF032458),
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 }

@@ -1112,6 +1112,145 @@ class VelneoAPIService {
       httpClient.close();
     }
   }
+  // Añadir estos métodos a la clase VelneoAPIService en api_service.dart
+
+  Future<Map<String, dynamic>> crearLead(Map<String, dynamic> lead) async {
+    final httpClient = HttpClient()
+      ..badCertificateCallback =
+          ((X509Certificate cert, String host, int port) => true)
+      ..connectionTimeout = const Duration(seconds: 30);
+
+    try {
+      print('📝 Creando lead en Velneo...');
+
+      final leadVelneo = {
+        'asu': lead['asunto'],
+        'dsc': lead['descripcion'] ?? '',
+        'com': lead['comercial_id'],
+        'crm_est_lea': lead['estado'],
+      };
+
+      // Campos opcionales
+      if (lead['cliente_id'] != null && lead['cliente_id'] != 0) {
+        leadVelneo['cli'] = lead['cliente_id'];
+      }
+      if (lead['campana_id'] != null && lead['campana_id'] != 0) {
+        leadVelneo['crm_cam_com'] = lead['campana_id'];
+      }
+
+      final jsonData = json.encode(leadVelneo);
+      print('📤 JSON enviado: $jsonData');
+
+      final request = await httpClient
+          .postUrl(Uri.parse(_buildUrl('/CRM_LEA')))
+          .timeout(const Duration(seconds: 30));
+
+      request.headers.set('Content-Type', 'application/json; charset=utf-8');
+      request.headers.set('Accept', 'application/json');
+      request.headers.set('User-Agent', 'Flutter App');
+      request.write(jsonData);
+
+      final response = await request.close().timeout(
+        const Duration(seconds: 30),
+      );
+      final stringData = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 10));
+
+      print('📥 Respuesta - Status: ${response.statusCode}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final respuesta = json.decode(stringData);
+
+        int? leadId;
+        if (respuesta['crm_lea'] != null &&
+            respuesta['crm_lea'] is List &&
+            (respuesta['crm_lea'] as List).isNotEmpty) {
+          leadId = respuesta['crm_lea'][0]['id'];
+        } else if (respuesta['id'] != null) {
+          leadId = respuesta['id'];
+        }
+
+        if (leadId == null) {
+          throw Exception('No se pudo obtener el ID del lead');
+        }
+
+        print('✅ Lead creado con ID $leadId');
+        return {'id': leadId, 'success': true};
+      }
+
+      throw Exception('Error HTTP ${response.statusCode}');
+    } catch (e) {
+      print('❌ Error al crear lead: $e');
+      rethrow;
+    } finally {
+      httpClient.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> actualizarLead(
+    String leadId,
+    Map<String, dynamic> lead,
+  ) async {
+    final httpClient = HttpClient()
+      ..badCertificateCallback =
+          ((X509Certificate cert, String host, int port) => true)
+      ..connectionTimeout = const Duration(seconds: 30);
+
+    try {
+      print('📝 Actualizando lead #$leadId en Velneo...');
+
+      final leadVelneo = {
+        'asu': lead['asunto'],
+        'dsc': lead['descripcion'] ?? '',
+        'com': lead['comercial_id'],
+        'crm_est_lea': lead['estado'],
+      };
+
+      // Campos opcionales
+      if (lead['cliente_id'] != null && lead['cliente_id'] != 0) {
+        leadVelneo['cli'] = lead['cliente_id'];
+      }
+      if (lead['campana_id'] != null && lead['campana_id'] != 0) {
+        leadVelneo['crm_cam_com'] = lead['campana_id'];
+      }
+
+      final jsonData = json.encode(leadVelneo);
+      print('📤 JSON enviado: $jsonData');
+
+      final request = await httpClient
+          .postUrl(Uri.parse(_buildUrl('/CRM_LEA/$leadId')))
+          .timeout(const Duration(seconds: 30));
+
+      request.headers.set('Content-Type', 'application/json; charset=utf-8');
+      request.headers.set('Accept', 'application/json');
+      request.headers.set('User-Agent', 'Flutter App');
+      request.write(jsonData);
+
+      final response = await request.close().timeout(
+        const Duration(seconds: 30),
+      );
+      final stringData = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 10));
+
+      print('📥 Respuesta - Status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        print('✅ Lead actualizado correctamente');
+        return {'id': int.parse(leadId), 'success': true};
+      }
+
+      throw Exception('Error HTTP ${response.statusCode}');
+    } catch (e) {
+      print('❌ Error al actualizar lead: $e');
+      rethrow;
+    } finally {
+      httpClient.close();
+    }
+  }
 
   Future<bool> probarConexion() async {
     try {
@@ -1132,6 +1271,169 @@ class VelneoAPIService {
     } catch (e) {
       print('Error en probarConexion: $e');
       return false;
+    }
+  }
+
+  Future<List<dynamic>> obtenerPresupuestos() async {
+    try {
+      print('📄 Descargando presupuestos...');
+
+      final url = _buildUrlWithParams('/VTA_PRE_G', {
+        'page': '1',
+        'page_size': '100',
+      });
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data['vta_pre_g'] != null && data['vta_pre_g'] is List) {
+          final presupuestosList = (data['vta_pre_g'] as List).map((
+            presupuesto,
+          ) {
+            return {
+              'id': presupuesto['id'],
+              'cliente_id': presupuesto['clt'] ?? 0,
+              'comercial_id': presupuesto['cmr'] ?? 0,
+              'fecha': presupuesto['fch'],
+              'numero': presupuesto['num_pre'] ?? '',
+              'observaciones': presupuesto['obs'] ?? '',
+              'estado': presupuesto['est'] ?? '',
+              'total': _convertirADouble(presupuesto['tot_pre']),
+              'base_total': _convertirADouble(presupuesto['bas_tot']),
+              'iva_total': _convertirADouble(presupuesto['iva_tot']),
+              'fecha_validez': presupuesto['fch_val'],
+              'fecha_aceptacion': presupuesto['fch_ace'],
+            };
+          }).toList();
+
+          print('✅ ${presupuestosList.length} presupuestos descargados');
+          return presupuestosList;
+        }
+      }
+
+      throw Exception('Error al obtener presupuestos: ${response.statusCode}');
+    } catch (e) {
+      print('❌ Error en obtenerPresupuestos: $e');
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> crearPresupuesto(
+    Map<String, dynamic> presupuesto,
+  ) async {
+    final httpClient = HttpClient()
+      ..badCertificateCallback =
+          ((X509Certificate cert, String host, int port) => true)
+      ..connectionTimeout = const Duration(seconds: 30);
+
+    try {
+      print('📝 Creando presupuesto en Velneo...');
+
+      // Preparar datos básicos del presupuesto
+      final presupuestoVelneo = {
+        'emp': '1',
+        'emp_div': '1',
+        'clt': presupuesto['cliente_id'],
+        'obs': presupuesto['observaciones'] ?? '',
+      };
+
+      // Agregar comercial si existe
+      if (presupuesto['comercial_id'] != null &&
+          presupuesto['comercial_id'] != 0) {
+        presupuestoVelneo['cmr'] = presupuesto['comercial_id'];
+      }
+
+      final jsonData = json.encode(presupuestoVelneo);
+      print('📤 JSON enviado: $jsonData');
+
+      final request = await httpClient
+          .postUrl(Uri.parse(_buildUrl('/VTA_PRE_G')))
+          .timeout(const Duration(seconds: 30));
+
+      request.headers.set('Content-Type', 'application/json; charset=utf-8');
+      request.headers.set('Accept', 'application/json');
+      request.headers.set('User-Agent', 'Flutter App');
+      request.write(jsonData);
+
+      final response = await request.close().timeout(
+        const Duration(seconds: 30),
+      );
+      final stringData = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 10));
+
+      print('📥 Respuesta - Status: ${response.statusCode}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final respuesta = json.decode(stringData);
+
+        int? presupuestoId;
+        if (respuesta['vta_pre_g'] != null &&
+            respuesta['vta_pre_g'] is List &&
+            (respuesta['vta_pre_g'] as List).isNotEmpty) {
+          presupuestoId = respuesta['vta_pre_g'][0]['id'];
+        } else if (respuesta['id'] != null) {
+          presupuestoId = respuesta['id'];
+        }
+
+        if (presupuestoId == null) {
+          throw Exception('No se pudo obtener el ID del presupuesto');
+        }
+
+        print('✅ Presupuesto creado con ID $presupuestoId');
+
+        // Ahora crear las líneas del presupuesto
+        int lineasCreadas = 0;
+        if (presupuesto['lineas'] != null) {
+          for (var linea in presupuesto['lineas']) {
+            try {
+              final lineaData = {
+                'vta_pre': presupuestoId,
+                'art': linea['articulo_id'],
+                'can': linea['cantidad'],
+                'pre': linea['precio'],
+              };
+
+              final lineaRequest = await httpClient
+                  .postUrl(Uri.parse(_buildUrl('/VTA_PRE_LIN_G')))
+                  .timeout(const Duration(seconds: 30));
+
+              lineaRequest.headers.set(
+                'Content-Type',
+                'application/json; charset=utf-8',
+              );
+              lineaRequest.headers.set('Accept', 'application/json');
+              lineaRequest.write(json.encode(lineaData));
+
+              final lineaResponse = await lineaRequest.close();
+              if (lineaResponse.statusCode == 200 ||
+                  lineaResponse.statusCode == 201) {
+                lineasCreadas++;
+              }
+            } catch (e) {
+              print('⚠️ Error al crear línea: $e');
+            }
+          }
+        }
+
+        return {
+          'id': presupuestoId,
+          'lineas_creadas': lineasCreadas,
+          'success': true,
+        };
+      }
+
+      throw Exception('Error HTTP ${response.statusCode}');
+    } catch (e) {
+      print('❌ Error al crear presupuesto: $e');
+      rethrow;
+    } finally {
+      httpClient.close();
     }
   }
 

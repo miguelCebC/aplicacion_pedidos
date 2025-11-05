@@ -7,14 +7,14 @@ import '../widgets/buscar_cliente_dialog.dart';
 import '../widgets/buscar_articulo_dialog.dart';
 import '../widgets/editar_linea_dialog.dart';
 
-class CrearPedidoScreen extends StatefulWidget {
-  const CrearPedidoScreen({super.key});
+class CrearPresupuestoScreen extends StatefulWidget {
+  const CrearPresupuestoScreen({super.key});
 
   @override
-  State<CrearPedidoScreen> createState() => _CrearPedidoScreenState();
+  State<CrearPresupuestoScreen> createState() => _CrearPresupuestoScreenState();
 }
 
-class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
+class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
   Map<String, dynamic>? _clienteSeleccionado;
   final _observacionesController = TextEditingController();
   final List<LineaPedidoData> _lineas = [];
@@ -92,7 +92,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
     );
   }
 
-  Future<void> _guardarPedido() async {
+  Future<void> _guardarPresupuesto() async {
     if (_guardando) return;
 
     if (_clienteSeleccionado == null) {
@@ -130,8 +130,9 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
 
       final apiService = VelneoAPIService(url, apiKey);
 
-      final pedidoVelneoData = {
+      final presupuestoData = {
         'cliente_id': _clienteSeleccionado!['id'],
+        'comercial_id': comercialId,
         'fecha': DateTime.now().toIso8601String(),
         'observaciones': _observacionesController.text,
         'total': _calcularTotal(),
@@ -146,12 +147,8 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
             .toList(),
       };
 
-      if (comercialId != null) {
-        pedidoVelneoData['cmr'] = comercialId;
-      }
-
       final resultado = await apiService
-          .crearPedido(pedidoVelneoData)
+          .crearPresupuesto(presupuestoData)
           .timeout(
             const Duration(seconds: 45),
             onTimeout: () => throw Exception(
@@ -159,24 +156,25 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
             ),
           );
 
-      final pedidoIdVelneo = resultado['id'];
+      final presupuestoId = resultado['id'];
 
       // Guardar en BD local
       final db = DatabaseHelper.instance;
-      await db.insertarPedido({
-        'id': pedidoIdVelneo,
+      await db.insertarPresupuesto({
+        'id': presupuestoId,
         'cliente_id': _clienteSeleccionado!['id'],
-        'cmr': comercialId,
+        'comercial_id': comercialId,
         'fecha': DateTime.now().toIso8601String(),
+        'numero': '',
+        'estado': 'P',
         'observaciones': _observacionesController.text,
         'total': _calcularTotal(),
-        'estado': 'Sincronizado',
         'sincronizado': 1,
       });
 
       for (var linea in _lineas) {
-        await db.insertarLineaPedido({
-          'pedido_id': pedidoIdVelneo,
+        await db.insertarLineaPresupuesto({
+          'presupuesto_id': presupuestoId,
           'articulo_id': linea.articulo['id'],
           'cantidad': linea.cantidad,
           'precio': linea.precio,
@@ -192,7 +190,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ Pedido #$pedidoIdVelneo creado correctamente'),
+          content: Text('✅ Presupuesto #$presupuestoId creado correctamente'),
           backgroundColor: const Color(0xFF032458),
           duration: const Duration(seconds: 2),
         ),
@@ -227,7 +225,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Crear Pedido'),
+        title: const Text('Crear Presupuesto'),
         backgroundColor: const Color(0xFF162846),
       ),
       body: _isLoading
@@ -477,7 +475,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
 
                 // Botón guardar
                 ElevatedButton.icon(
-                  onPressed: _guardando ? null : _guardarPedido,
+                  onPressed: _guardando ? null : _guardarPresupuesto,
                   icon: _guardando
                       ? const SizedBox(
                           width: 20,
@@ -488,7 +486,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                           ),
                         )
                       : const Icon(Icons.save),
-                  label: const Text('Crear Pedido'),
+                  label: const Text('Crear Presupuesto'),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.all(16),
                     backgroundColor: const Color(0xFF032458),

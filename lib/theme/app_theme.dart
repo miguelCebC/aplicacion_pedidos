@@ -54,6 +54,10 @@ class AppTheme {
           borderSide: const BorderSide(color: colorPrincipal, width: 2),
         ),
       ),
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: colorPrincipal, // Color de fondo del botón
+        foregroundColor: Colors.white, // Color del icono (foreground)
+      ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: colorPrincipal,
         indicatorColor: colorSecundario,

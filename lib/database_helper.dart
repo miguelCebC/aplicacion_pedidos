@@ -190,6 +190,38 @@ class DatabaseHelper {
         FOREIGN KEY (articulo_id) REFERENCES articulos (id)
       )
     ''');
+    await db.execute('''
+  CREATE TABLE IF NOT EXISTS presupuestos (
+    id INTEGER PRIMARY KEY,
+    cliente_id INTEGER NOT NULL,
+    comercial_id INTEGER,
+    usuario_id INTEGER,
+    fecha TEXT NOT NULL,
+    numero TEXT,
+    estado TEXT,
+    observaciones TEXT,
+    total REAL,
+    base_total REAL,
+    iva_total REAL,
+    fecha_validez TEXT,
+    fecha_aceptacion TEXT,
+    sincronizado INTEGER DEFAULT 0,
+    FOREIGN KEY (cliente_id) REFERENCES clientes (id),
+    FOREIGN KEY (comercial_id) REFERENCES comerciales (id)
+  )
+''');
+
+    await db.execute('''
+  CREATE TABLE IF NOT EXISTS lineas_presupuesto (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    presupuesto_id INTEGER NOT NULL,
+    articulo_id INTEGER NOT NULL,
+    cantidad REAL NOT NULL,
+    precio REAL NOT NULL,
+    FOREIGN KEY (presupuesto_id) REFERENCES presupuestos (id),
+    FOREIGN KEY (articulo_id) REFERENCES articulos (id)
+  )
+''');
 
     print('✅ Base de datos creada correctamente');
   }
@@ -253,6 +285,72 @@ class DatabaseHelper {
       'SELECT COUNT(*) as count FROM agenda WHERE sincronizado = 0',
     );
     return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  Future<int> insertarPresupuesto(Map<String, dynamic> presupuesto) async {
+    final db = await database;
+    return await db.insert(
+      'presupuestos',
+      presupuesto,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<int> insertarLineaPresupuesto(Map<String, dynamic> linea) async {
+    final db = await database;
+    return await db.insert('lineas_presupuesto', linea);
+  }
+
+  Future<List<Map<String, dynamic>>> obtenerPresupuestos() async {
+    final db = await database;
+    return await db.query('presupuestos', orderBy: 'fecha DESC');
+  }
+
+  Future<List<Map<String, dynamic>>> obtenerLineasPresupuesto(
+    int presupuestoId,
+  ) async {
+    final db = await database;
+    return await db.query(
+      'lineas_presupuesto',
+      where: 'presupuesto_id = ?',
+      whereArgs: [presupuestoId],
+    );
+  }
+
+  Future<void> insertarPresupuestosLote(
+    List<Map<String, dynamic>> presupuestos,
+  ) async {
+    final db = await database;
+    final batch = db.batch();
+
+    for (var presupuesto in presupuestos) {
+      batch.insert(
+        'presupuestos',
+        presupuesto,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> limpiarPresupuestos() async {
+    final db = await database;
+    await db.delete('presupuestos');
+    await db.delete('lineas_presupuesto');
+  }
+
+  Future<int> actualizarPresupuestoSincronizado(
+    int presupuestoId,
+    int sincronizado,
+  ) async {
+    final db = await database;
+    return await db.update(
+      'presupuestos',
+      {'sincronizado': sincronizado},
+      where: 'id = ?',
+      whereArgs: [presupuestoId],
+    );
   }
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {

@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
-import 'crear_pedido_screen.dart';
-import 'lista_pedidos_screen.dart';
+import 'pedidos_screen.dart';
 import 'configuracion_screen.dart';
-import 'crm_calendario_screen.dart'; // ← AÑADIR IMPORT
+import 'crm_calendario_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -13,70 +12,47 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _HomeScreenState extends State<HomeScreen> {
+  int _currentIndex = 0;
 
-  // 🟢 2. Volver a la lista de 4 pestañas
-  final List<String> _tabs = [
-    'Nuevo Pedido',
-    'Lista Pedidos',
-    'CRM',
-    'Configuración',
-  ];
-
-  // 🟢 3. Volver a los 4 iconos
-  final List<IconData> _tabIcons = [
-    Icons.add_shopping_cart,
-    Icons.list_alt,
-    Icons.calendar_today,
-    Icons.settings,
-  ];
-
-  // 🟢 4. Volver a las 4 pantallas
-  final List<Widget> _tabViews = [
-    const CrearPedidoScreen(),
-    const ListaPedidosScreen(),
+  final List<Widget> _screens = [
+    const PedidosScreen(),
     const CRMCalendarioScreen(),
     const ConfiguracionScreen(),
   ];
 
   @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(
-      length: _tabs.length, // Se actualiza solo
-      vsync: this,
-    );
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final screens = [
-      const CrearPedidoScreen(),
-      const ListaPedidosScreen(),
-      const CRMCalendarioScreen(), // ← AÑADIR PANTALLA CRM
-      const ConfiguracionScreen(),
-    ];
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Gestión de Pedidos'),
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabs: List.generate(_tabs.length, (index) {
-            return Tab(icon: Icon(_tabIcons[index]), text: _tabs[index]);
-          }),
-        ),
+      body: _screens[_currentIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: const Color(0xFF162846),
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.white60,
+        selectedFontSize: 12,
+        unselectedFontSize: 11,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.shopping_cart),
+            label: 'Pedidos',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_today),
+            label: 'CRM',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Configuración',
+          ),
+        ],
       ),
-      body: TabBarView(controller: _tabController, children: _tabViews),
     );
   }
 }
