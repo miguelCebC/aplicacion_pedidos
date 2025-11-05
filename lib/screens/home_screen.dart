@@ -13,45 +13,47 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  int _selectedIndex = 0;
-  String _ultimaSincronizacion = '';
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  // 🟢 2. Volver a la lista de 4 pestañas
+  final List<String> _tabs = [
+    'Nuevo Pedido',
+    'Lista Pedidos',
+    'CRM',
+    'Configuración',
+  ];
+
+  // 🟢 3. Volver a los 4 iconos
+  final List<IconData> _tabIcons = [
+    Icons.add_shopping_cart,
+    Icons.list_alt,
+    Icons.calendar_today,
+    Icons.settings,
+  ];
+
+  // 🟢 4. Volver a las 4 pantallas
+  final List<Widget> _tabViews = [
+    const CrearPedidoScreen(),
+    const ListaPedidosScreen(),
+    const CRMCalendarioScreen(),
+    const ConfiguracionScreen(),
+  ];
 
   @override
   void initState() {
     super.initState();
-    _cargarDatosPrueba();
-    _cargarInfoSincronizacion();
+    _tabController = TabController(
+      length: _tabs.length, // Se actualiza solo
+      vsync: this,
+    );
   }
 
-  Future<void> _cargarDatosPrueba() async {
-    await DatabaseHelper.instance.cargarDatosPrueba();
-  }
-
-  Future<void> _cargarInfoSincronizacion() async {
-    final prefs = await SharedPreferences.getInstance();
-    final ultimaSync = prefs.getInt('ultima_sincronizacion');
-
-    if (ultimaSync != null) {
-      final fecha = DateTime.fromMillisecondsSinceEpoch(ultimaSync);
-      final ahora = DateTime.now();
-      final diferencia = ahora.difference(fecha);
-
-      String texto;
-      if (diferencia.inMinutes < 1) {
-        texto = 'Sincronizado hace unos segundos';
-      } else if (diferencia.inHours < 1) {
-        texto = 'Sincronizado hace ${diferencia.inMinutes} min';
-      } else if (diferencia.inDays < 1) {
-        texto = 'Sincronizado hace ${diferencia.inHours}h';
-      } else {
-        texto = 'Sincronizado hace ${diferencia.inDays}d';
-      }
-
-      if (mounted) {
-        setState(() => _ultimaSincronizacion = texto);
-      }
-    }
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   @override
@@ -64,56 +66,17 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
 
     return Scaffold(
-      body: screens[_selectedIndex],
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_ultimaSincronizacion.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-              color: const Color(0xFFCAD3E2),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.cloud_done,
-                    size: 14,
-                    color: Color(0xFF032458),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _ultimaSincronizacion,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF032458),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          NavigationBar(
-            selectedIndex: _selectedIndex,
-            onDestinationSelected: (index) {
-              setState(() => _selectedIndex = index);
-            },
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.add_shopping_cart),
-                label: 'Nuevo Pedido',
-              ),
-              NavigationDestination(icon: Icon(Icons.list), label: 'Pedidos'),
-              NavigationDestination(
-                icon: Icon(Icons.calendar_today),
-                label: 'Agenda',
-              ), // ← AÑADIR DESTINO
-              NavigationDestination(
-                icon: Icon(Icons.settings),
-                label: 'Configuración',
-              ),
-            ],
-          ),
-        ],
+      appBar: AppBar(
+        title: const Text('Gestión de Pedidos'),
+        bottom: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabs: List.generate(_tabs.length, (index) {
+            return Tab(icon: Icon(_tabIcons[index]), text: _tabs[index]);
+          }),
+        ),
       ),
+      body: TabBarView(controller: _tabController, children: _tabViews),
     );
   }
 }
