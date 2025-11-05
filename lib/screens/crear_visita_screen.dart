@@ -81,13 +81,17 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     bool esInicio, {
     bool esProxima = false,
   }) async {
+    // 🟢 Leer los días por defecto para la fecha inicial de "próxima visita"
+    final prefs = await SharedPreferences.getInstance();
+    final int diasDefecto = prefs.getInt('proxima_visita_dias') ?? 60;
+
     final fecha = await showDatePicker(
       context: context,
       initialDate: esInicio
           ? (_fechaInicio ?? DateTime.now())
           : (esProxima
                 ? (_fechaProximaVisita ??
-                      DateTime.now().add(const Duration(days: 60)))
+                      DateTime.now().add(Duration(days: diasDefecto)))
                 : (_fechaFin ?? DateTime.now())),
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
@@ -252,10 +256,16 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
               '${_horaProximaVisita!.hour.toString().padLeft(2, '0')}:${_horaProximaVisita!.minute.toString().padLeft(2, '0')}:00'; // "HH:MM:SS"
         } else {
           // Si el usuario NO PUSO fecha/hora, las calculamos NOSOTROS
-          DebugLogger.log(
-            '📦 ...calculando fecha/hora por defecto (hoy + 60) para visita nueva',
-          );
-          final fechaDefecto = DateTime.now().add(const Duration(days: 60));
+          DebugLogger.log('📦 ...calculando fecha/hora por defecto...');
+
+          // 🟢 Leer los días de las Preferencias
+          final prefs = await SharedPreferences.getInstance();
+          final int diasDefecto = prefs.getInt('proxima_visita_dias') ?? 60;
+          DebugLogger.log('📦 ...usando $diasDefecto días por defecto.');
+
+          // 🟢 LÍNEA CORREGIDA: Usar _fechaInicio en lugar de DateTime.now()
+          final fechaDefecto = _fechaInicio!.add(Duration(days: diasDefecto));
+
           fechaProximaStr = fechaDefecto.toIso8601String().split(
             'T',
           )[0]; // "YYYY-MM-DD"
@@ -731,7 +741,8 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                         Padding(
                           padding: const EdgeInsets.all(12.0),
                           child: Text(
-                            'Si dejas estos campos vacíos, se programará una visita automática en 60 días.',
+                            // 🟢 5. Texto actualizado
+                            'Si dejas estos campos vacíos, se programará una visita automática según los días de configuración.',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey[600],

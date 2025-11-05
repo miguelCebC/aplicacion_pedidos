@@ -172,13 +172,17 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
     bool esInicio, {
     bool esProxima = false,
   }) async {
+    // 🟢 Leer los días por defecto para la fecha inicial de "próxima visita"
+    final prefs = await SharedPreferences.getInstance();
+    final int diasDefecto = prefs.getInt('proxima_visita_dias') ?? 60;
+
     final fecha = await showDatePicker(
       context: context,
       initialDate: esInicio
           ? (_fechaInicio ?? DateTime.now())
           : (esProxima
                 ? (_fechaProximaVisita ??
-                      DateTime.now().add(const Duration(days: 60)))
+                      DateTime.now().add(Duration(days: diasDefecto)))
                 : (_fechaFin ?? DateTime.now())),
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
@@ -258,8 +262,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
       return;
     }
 
-    // (Omitida la validación de año, ya que el bug de 1925 es por otra cosa)
-
     setState(() {
       _isLoading = true;
       _guardando = true;
@@ -330,17 +332,26 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
           )[0]; // "YYYY-MM-DD"
           horaProximaStr =
               '${_horaProximaVisita!.hour.toString().padLeft(2, '0')}:${_horaProximaVisita!.minute.toString().padLeft(2, '0')}:00'; // "HH:MM:SS"
+          // [DENTRO DE LA FUNCIÓN _guardarCambios]
+          // ...
         } else {
           // Si el usuario NO PUSO fecha/hora, las calculamos NOSOTROS
-          DebugLogger.log(
-            '📦 ...calculando fecha/hora por defecto (hoy + 60) para visita nueva',
-          );
-          final fechaDefecto = DateTime.now().add(const Duration(days: 60));
+          DebugLogger.log('📦 ...calculando fecha/hora por defecto...');
+
+          // 🟢 Leer los días de las Preferencias
+          final prefs = await SharedPreferences.getInstance();
+          final int diasDefecto = prefs.getInt('proxima_visita_dias') ?? 60;
+          DebugLogger.log('📦 ...usando $diasDefecto días por defecto.');
+
+          // 🟢 LÍNEA CORREGIDA: Usar _fechaInicio en lugar de DateTime.now()
+          final fechaDefecto = _fechaInicio!.add(Duration(days: diasDefecto));
+
           fechaProximaStr = fechaDefecto.toIso8601String().split(
             'T',
           )[0]; // "YYYY-MM-DD"
           horaProximaStr = "09:00:00"; // Hora por defecto
         }
+        // ...
       }
 
       // ==================================================
@@ -365,8 +376,8 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         'sincronizado': 1,
 
         // --- Campos de Próxima Visita (SIEMPRE DESACTIVADOS) ---
-        'fecha_proxima_visita': null, // Se gestiona manualmente
-        'hora_proxima_visita': null, // Se gestiona manualmente
+        'fecha_proxima_visita': null,
+        'hora_proxima_visita': null,
         'no_gen_pro_vis': noGenProVis, // <-- true
         'no_gen_tri': noGenTri, // <-- true
       };
@@ -419,9 +430,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
       );
 
       DebugLogger.log('💾 Visita actualizada en BD local');
-
-      // [DENTRO DE LA FUNCIÓN _guardarCambios]
-      // ... después de actualizar la visita actual ...
 
       // --- PASO 2: CREACIÓN MANUAL DE LA PRÓXIMA VISITA ---
       if (crearVisitaManualmente) {
@@ -479,7 +487,6 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
           '📥 ===== RESPUESTA crearVisitaAgenda (Visita Nueva) =====',
         );
 
-        // ... resto de la función ...
         final idVelneoNueva = resultadoNuevaVisita['id'];
         if (idVelneoNueva != null) {
           DebugLogger.log('✅ Visita nueva creada con ID: $idVelneoNueva');
@@ -772,7 +779,8 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                         Padding(
                           padding: const EdgeInsets.all(12.0),
                           child: Text(
-                            'Si dejas estos campos vacíos, se programará una visita automática en 60 días.',
+                            // 🟢 6. Texto actualizado
+                            'Si dejas estos campos vacíos, se programará una visita automática según los días de configuración.',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey[600],

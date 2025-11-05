@@ -13,7 +13,9 @@ class CRMCalendarioScreen extends StatefulWidget {
   State<CRMCalendarioScreen> createState() => _CRMCalendarioScreenState();
 }
 
-class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
+// 🟢 1. Se añade 'with AutomaticKeepAliveClientMixin' para mantener viva la pestaña
+class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
+    with AutomaticKeepAliveClientMixin {
   CalendarFormat _calendarFormat = CalendarFormat.month;
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
@@ -24,6 +26,11 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
   bool _isLoading = true;
   bool _sincronizando = false;
   int _visitasPendientes = 0;
+
+  // 🟢 2. Se añade la propiedad 'wantKeepAlive'
+  @override
+  bool get wantKeepAlive => true; // Esto mantiene el estado de la pestaña
+
   @override
   void initState() {
     super.initState();
@@ -43,8 +50,11 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
     });
 
     if (comercialId != null) {
-      // Sincronizar automáticamente al abrir
-      await _sincronizarVisitas();
+      // 🟢 3. MODIFICADO:
+      // Ya no llamamos a _sincronizarVisitas() aquí.
+      // Solo cargamos los eventos de la base de datos local.
+      // La sincronización de red ya la hace 'main.dart' en segundo plano.
+      await _cargarEventos();
     } else {
       setState(() => _isLoading = false);
     }
@@ -102,9 +112,19 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
   String _formatearHora(String? horaStr) {
     if (horaStr == null || horaStr.isEmpty) return '';
     try {
-      final hora = DateTime.parse(horaStr);
-      return '${hora.hour.toString().padLeft(2, '0')}:${hora.minute.toString().padLeft(2, '0')}';
+      // Controlar el formato de hora que viene de Velneo (ej. "9:0:0")
+      if (horaStr.contains(':')) {
+        final parts = horaStr.split(':');
+        final hora = int.parse(parts[0]).toString().padLeft(2, '0');
+        final minuto = int.parse(parts[1]).toString().padLeft(2, '0');
+        return '$hora:$minuto';
+      }
+      // Si es una fecha completa (ej. guardado local)
+      final dt = DateTime.parse(horaStr);
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     } catch (e) {
+      // Fallback por si el formato es inesperado
+      if (horaStr.length > 5) return horaStr.substring(0, 5);
       return horaStr;
     }
   }
@@ -119,16 +139,20 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
     );
 
     if (resultado == true) {
-      // Recargar eventos después de crear
+      // Recargar eventos después de crear (desde la BD local)
       await _cargarEventos();
     }
   }
 
+  // Esta función se mantiene para el botón de refresco manual
   Future<void> _sincronizarVisitas() async {
     if (_comercialId == null) {
       setState(() => _isLoading = false);
       return;
     }
+
+    // Evitar sincronizaciones múltiples si ya hay una en curso
+    if (_sincronizando) return;
 
     setState(() => _sincronizando = true);
 
@@ -162,19 +186,17 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
       print('✅ Agenda sincronizada: ${visitasComercial.length} visitas');
 
       setState(() => _sincronizando = false);
-      await _cargarEventos();
+      await _cargarEventos(); // Carga los datos recién descargados
 
       if (!mounted) return;
 
       // Solo mostrar mensaje si es sincronización manual (no al abrir)
-      if (_isLoading == false) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ ${visitasComercial.length} visitas sincronizadas'),
-            backgroundColor: const Color(0xFF032458),
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ ${visitasComercial.length} visitas sincronizadas'),
+          backgroundColor: const Color(0xFF032458),
+        ),
+      );
     } catch (e) {
       setState(() {
         _sincronizando = false;
@@ -196,6 +218,9 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 🟢 4. Se añade 'super.build(context)'
+    super.build(context); // Requerido por AutomaticKeepAliveClientMixin
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -354,6 +379,10 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen> {
                                           DetalleVisitaScreen(visita: evento),
                                     ),
                                   );
+                                  // Si se borra o edita la visita, recargar
+                                  if (resultado == true) {
+                                    _cargarEventos();
+                                  }
                                 },
                                 child: ListTile(
                                   leading: CircleAvatar(

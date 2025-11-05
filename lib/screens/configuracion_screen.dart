@@ -17,6 +17,8 @@ List<Map<String, dynamic>> _comerciales = [];
 class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
   final _urlController = TextEditingController();
   final _apiKeyController = TextEditingController();
+  final _diasVisitaController = TextEditingController();
+
   bool _isSyncing = false;
   String _syncStatus = '';
   double _syncProgress = 0.0;
@@ -51,6 +53,9 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
           prefs.getString('velneo_url') ??
           'tecerp.nunsys.com:4311/TORRAL/TecERPv7_dat_dat/v1';
       _apiKeyController.text = prefs.getString('velneo_api_key') ?? '1234';
+      _diasVisitaController.text = (prefs.getInt('proxima_visita_dias') ?? 60)
+          .toString();
+
       _comercialSeleccionadoId = prefs.getInt('comercial_id');
       _comercialSeleccionadoNombre =
           prefs.getString('comercial_nombre') ?? 'Sin asignar';
@@ -62,6 +67,8 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('velneo_url', _urlController.text);
     await prefs.setString('velneo_api_key', _apiKeyController.text);
+    final int dias = int.tryParse(_diasVisitaController.text) ?? 60;
+    await prefs.setInt('proxima_visita_dias', dias);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -86,10 +93,13 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Seleccionar Comercial'),
+
+        // 🟢 ESTE CÓDIGO (CON SIZEDBOX) ES LA CORRECCIÓN DEL PASO ANTERIOR
         content: SizedBox(
           width: double.maxFinite,
+          height: 300, // <-- Altura fija para el área de scroll
           child: ListView.builder(
-            shrinkWrap: true,
+            // shrinkWrap: true, // <-- Esta línea NO debe estar
             itemCount: _comerciales.length + 1,
             itemBuilder: (context, index) {
               if (index == 0) {
@@ -139,6 +149,10 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
     }
   }
 
+  // [DENTRO DE lib/screens/configuracion_screen.dart]
+
+  // [DENTRO DE lib/screens/configuracion_screen.dart]
+
   Future<void> _sincronizarDatos() async {
     if (_urlController.text.isEmpty || _apiKeyController.text.isEmpty) {
       if (!mounted) return;
@@ -158,7 +172,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       _logMessages.clear();
     });
 
-    _addLog('ðŸš€ Iniciando sincronización');
+    _addLog('🚀 Iniciando sincronización');
 
     try {
       String url = _urlController.text.trim();
@@ -178,12 +192,12 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _syncProgress = 0.05;
       });
 
-      _addLog('ðŸ” Verificando conexión con API');
+      _addLog('🔌 Verificando conexión con API');
       final conexionOk = await apiService.probarConexion();
       if (!conexionOk) {
         throw Exception('No se puede conectar a la API');
       }
-      _addLog('âœ… Conexión exitosa');
+      _addLog('✅ Conexión exitosa');
 
       setState(() {
         _syncStatus = 'Descargando datos...';
@@ -191,15 +205,20 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _syncDetalle = 'Iniciando descarga';
       });
 
-      _addLog('ðŸ“¥ Descargando artÃ­culos');
+      _addLog('📦 Descargando artículos');
       final articulosLista = await apiService.obtenerArticulos();
-      _addLog('âœ… ${articulosLista.length} artÃ­culos descargados');
-      _addLog('📥 Descargando clientes y comerciales');
+      _addLog('✅ ${articulosLista.length} artículos descargados');
+
+      // ================================================
+      // == 🟢 ESTA ES LA VERSIÓN QUE ESPERA UN MAPA ==
+      // ================================================
+      _addLog('📥 Descargando clientes y comerciales (endpoint /ENT_M)...');
       final resultadoClientes = await apiService.obtenerClientes();
       final clientesLista = resultadoClientes['clientes'] as List;
       final comercialesLista = resultadoClientes['comerciales'] as List;
-      _addLog('✅ ${clientesLista.length} clientes descargados');
-      _addLog('✅ ${comercialesLista.length} comerciales descargados');
+      _addLog('✅ ${clientesLista.length} clientes únicos descargados');
+      _addLog('✅ ${comercialesLista.length} comerciales únicos descargados');
+      // ================================================
 
       setState(() {
         _syncProgress = 0.5;
@@ -208,19 +227,19 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
             '${articulosLista.length} artículos, ${clientesLista.length} clientes, ${comercialesLista.length} comerciales';
       });
 
-      // GUARDAR ARTÃCULOS
+      // GUARDAR ARTÍCULOS
       setState(() {
-        _syncStatus = 'Guardando artÃ­culos...';
+        _syncStatus = 'Guardando artículos...';
         _syncProgress = 0.55;
         _syncDetalle = 'Preparando...';
       });
 
-      _addLog('ðŸ’¾ Limpiando artÃ­culos antiguos');
+      _addLog('🧹 Limpiando artículos antiguos');
       await db.limpiarArticulos();
 
       const batchSize = 500;
       _addLog(
-        'ðŸ’¾ Guardando ${articulosLista.length} artÃ­culos en lotes de $batchSize',
+        '💾 Guardando ${articulosLista.length} artículos en lotes de $batchSize',
       );
 
       for (var i = 0; i < articulosLista.length; i += batchSize) {
@@ -242,7 +261,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         });
       }
 
-      _addLog('âœ… ${articulosLista.length} artÃ­culos guardados');
+      _addLog('✅ ${articulosLista.length} artículos guardados');
 
       // GUARDAR CLIENTES
       setState(() {
@@ -251,9 +270,8 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _syncDetalle = 'Preparando...';
       });
 
-      _addLog('💾 Limpiando clientes antiguos');
+      _addLog('🧹 Limpiando clientes antiguos');
       await db.limpiarClientes();
-      await db.limpiarComerciales();
 
       _addLog(
         '💾 Guardando ${clientesLista.length} clientes en lotes de $batchSize',
@@ -287,7 +305,12 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _syncDetalle = 'Preparando...';
       });
 
-      _addLog('💾 Guardando ${comercialesLista.length} comerciales');
+      _addLog('🧹 Limpiando comerciales antiguos');
+      await db.limpiarComerciales();
+
+      _addLog(
+        '💾 Guardando ${comercialesLista.length} comerciales (desde API)',
+      );
 
       if (comercialesLista.isNotEmpty) {
         await db.insertarComercialesLote(
@@ -295,13 +318,15 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         );
       }
 
-      _addLog('✅ ${comercialesLista.length} comerciales guardados');
+      // Volvemos a leer de la DB para saber el número REAL
+      final comercialesGuardados = await db.obtenerComerciales();
+      _addLog('✅ ${comercialesGuardados.length} comerciales AHORA EN DB');
 
-      // Recargar lista de comerciales
-      final comerciales = await db.obtenerComerciales();
+      // Recargar lista de comerciales para la UI
       setState(() {
-        _comerciales = comerciales;
+        _comerciales = comercialesGuardados;
       });
+
       // === SINCRONIZAR DATOS CRM ===
       setState(() {
         _syncStatus = 'Descargando datos CRM...';
@@ -363,11 +388,8 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _syncDetalle = 'Agenda';
       });
       _addLog('📥 Descargando agenda...');
-      final prefsAgenda =
-          await SharedPreferences.getInstance(); // ← AÑADIR ESTA LÍNEA
-      final comercialId = prefsAgenda.getInt(
-        'comercial_id',
-      ); // ← USAR prefsAgenda
+      final prefsAgenda = await SharedPreferences.getInstance();
+      final comercialId = prefsAgenda.getInt('comercial_id');
       final agendasLista = await apiService.obtenerAgenda(comercialId);
       await db.limpiarAgenda();
       await db.insertarAgendasLote(agendasLista.cast<Map<String, dynamic>>());
@@ -394,7 +416,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
             '✓ Sincronización completa\n'
             '${articulosLista.length} artículos\n'
             '${clientesLista.length} clientes\n'
-            '${comercialesLista.length} comerciales\n'
+            '${comercialesGuardados.length} comerciales\n' // 🟢 Usa la variable correcta
             '${tiposVisitaLista.length} tipos de visita\n'
             '${provinciasLista.length} provincias\n'
             '${zonasLista.length} zonas técnicas\n'
@@ -435,12 +457,14 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
     }
   }
 
+  // ... (El resto del fichero configuracion_screen.dart no cambia) ...
+
   Future<void> _limpiarDatos() async {
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Confirmar'),
-        content: const Text('Â¿Eliminar todos los datos locales?'),
+        content: const Text('¿Eliminar todos los datos locales?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -481,6 +505,50 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
     );
   }
 
+  // 🟢 1. NUEVA FUNCIÓN DE DIAGNÓSTICO
+  Future<void> _verificarComercialesDB() async {
+    final db = DatabaseHelper.instance;
+    final comerciales = await db.obtenerComerciales();
+
+    print('--- VERIFICACIÓN DB COMERCIALES ---');
+    print('Total encontrados: ${comerciales.length}');
+
+    final nombres = comerciales.map((c) => c['nombre']).toList();
+    print(nombres.join('\n'));
+    print('------------------------------------');
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('DB Contenido: Comerciales (${comerciales.length})'),
+        content: SizedBox(
+          height: 400, // <-- Más altura para ver más
+          width: double.maxFinite,
+          child: ListView.builder(
+            itemCount: comerciales.length,
+            itemBuilder: (context, index) {
+              final comercial = comerciales[index];
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                child: Text(
+                  '${index + 1}. ${comercial['nombre']} (ID: ${comercial['id']})',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -508,6 +576,16 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
               labelText: 'API Key',
               border: OutlineInputBorder(),
             ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _diasVisitaController,
+            decoration: const InputDecoration(
+              labelText: 'Días por defecto próxima visita',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.calendar_today_outlined),
+            ),
+            keyboardType: TextInputType.number,
           ),
           const SizedBox(height: 16),
           ElevatedButton.icon(
@@ -624,9 +702,9 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontFamily: 'monospace',
-                                color: msg.contains('âŒ')
+                                color: msg.contains('❌')
                                     ? Colors.red
-                                    : msg.contains('âœ…')
+                                    : msg.contains('✅')
                                     ? Colors.green
                                     : Colors.black87,
                               ),
@@ -666,6 +744,19 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
             ),
           ),
           const SizedBox(height: 16),
+
+          // 🟢 2. AÑADIR EL NUEVO BOTÓN
+          ElevatedButton.icon(
+            onPressed: _verificarComercialesDB,
+            icon: const Icon(Icons.bug_report_outlined),
+            label: const Text('Verificar Comerciales en DB'),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.all(16),
+              backgroundColor: Colors.orange[800],
+            ),
+          ),
+          const SizedBox(height: 16),
+
           ElevatedButton.icon(
             onPressed: _limpiarDatos,
             icon: const Icon(Icons.delete_forever),

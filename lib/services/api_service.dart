@@ -119,7 +119,7 @@ class VelneoAPIService {
               // Si ya tenemos todos los registros según total_count
               if (totalCount > 0 && allArticulos.length >= totalCount) {
                 print(
-                  '  ðŸ Total alcanzado (${allArticulos.length} >= $totalCount)',
+                  '  ðŸ   Total alcanzado (${allArticulos.length} >= $totalCount)',
                 );
                 break;
               }
@@ -128,14 +128,14 @@ class VelneoAPIService {
               page++;
               await Future.delayed(const Duration(milliseconds: 200));
             } else {
-              print('  ðŸ No hay campo art_m en respuesta');
+              print('  ðŸ   No hay campo art_m en respuesta');
               break;
             }
           } else {
             throw Exception('Error HTTP ${response.statusCode}');
           }
         } catch (e) {
-          print('âŒ Error en página $page: $e');
+          print('â Œ Error en página $page: $e');
           if (allArticulos.isEmpty) {
             rethrow;
           }
@@ -444,14 +444,10 @@ class VelneoAPIService {
                       if (fechaStr.isEmpty) return null;
 
                       try {
-                        // Si ya está en formato ISO, devolverlo
                         if (fechaStr.contains('T') && fechaStr.contains('Z')) {
-                          DateTime.parse(fechaStr); // Verificar que es válido
+                          DateTime.parse(fechaStr);
                           return fechaStr;
                         }
-
-                        // Si es formato de texto como "mar. nov. 4 00:00:00 2025 GMT"
-                        // Intentar parsear y convertir a ISO
                         if (fechaStr.contains('GMT') ||
                             fechaStr.contains('UTC')) {
                           try {
@@ -464,8 +460,6 @@ class VelneoAPIService {
                             return null;
                           }
                         }
-
-                        // Intentar parsear como está
                         final dt = DateTime.parse(fechaStr);
                         return dt.toIso8601String();
                       } catch (e) {
@@ -476,7 +470,6 @@ class VelneoAPIService {
                       }
                     }
 
-                    // Extraer fecha de inicio (obligatoria)
                     final fechaInicio = limpiarFecha(agenda['fch_ini']);
 
                     if (fechaInicio == null) {
@@ -495,22 +488,23 @@ class VelneoAPIService {
                       'campana_id': agenda['crm_cam_com'] ?? 0,
                       'fecha_inicio':
                           fechaInicio ?? DateTime.now().toIso8601String(),
-                      'hora_inicio': fechaInicio, // Usar la misma fecha limpia
+                      'hora_inicio': fechaInicio,
                       'fecha_fin': limpiarFecha(agenda['fch_fin']),
-                      'hora_fin': limpiarFecha(
-                        agenda['fch_fin'],
-                      ), // Usar fecha_fin también para hora_fin
+                      'hora_fin': limpiarFecha(agenda['fch_fin']),
                       'fecha_proxima_visita': limpiarFecha(
                         agenda['fch_pro_vis'],
                       ),
-                      'hora_proxima_visita':
-                          null, // No hay campo separado de hora
+                      'hora_proxima_visita': null,
                       'descripcion': agenda['dsc']?.toString() ?? '',
                       'todo_dia': (agenda['tod_dia'] == true) ? 1 : 0,
                       'lead_id': agenda['crm_lea'] ?? 0,
                       'presupuesto_id': agenda['vta_pre_g'] ?? 0,
                       'generado': (agenda['gen'] == true) ? 1 : 0,
                       'sincronizado': 1,
+
+                      // 🟢 Añadimos los campos que faltaban de versiones anteriores
+                      'no_gen_pro_vis': agenda['no_gen_pro_vis'] ?? false,
+                      'no_gen_tri': agenda['no_gen_tri'] ?? false,
                     };
                   })
                   .toList();
@@ -717,14 +711,12 @@ class VelneoAPIService {
 
   Future<Map<String, dynamic>> crearPedido(Map<String, dynamic> pedido) async {
     try {
-      // Preparar el pedido en el formato de Velneo
       final pedidoVelneo = {
-        'emp': '1', // Empresa
-        'emp_div': '1', // División de empresa
-        'clt': pedido['cliente_id'], // ID del cliente
+        'emp': '1',
+        'emp_div': '1',
+        'clt': pedido['cliente_id'],
       };
 
-      // Agregar comercial si está presente
       if (pedido['cmr'] != null) {
         pedidoVelneo['cmr'] = pedido['cmr'];
         print('📝 Asignando comercial ID: ${pedido['cmr']} al pedido');
@@ -732,7 +724,6 @@ class VelneoAPIService {
 
       print('📄 Creando pedido en Velneo: $pedidoVelneo');
 
-      // Crear el pedido principal
       final httpClient = HttpClient()
         ..badCertificateCallback =
             ((X509Certificate cert, String host, int port) => true)
@@ -761,7 +752,6 @@ class VelneoAPIService {
         if (response.statusCode == 200 || response.statusCode == 201) {
           final respuesta = json.decode(stringData);
 
-          // CORRECCIÃ“N: La API devuelve el pedido dentro de un array 'vta_ped_g'
           int? pedidoId;
           if (respuesta['vta_ped_g'] != null &&
               respuesta['vta_ped_g'] is List &&
@@ -777,7 +767,6 @@ class VelneoAPIService {
             throw Exception('No se pudo obtener el ID del pedido creado');
           }
 
-          // Crear las lÃ­neas del pedido
           int lineasOk = 0;
           int lineasError = 0;
 
@@ -790,7 +779,6 @@ class VelneoAPIService {
               } catch (e) {
                 lineasError++;
                 print('  âœ— Error lÃ­nea: $e');
-                // Si fallan TODAS las lÃ­neas, lanzar error
                 if (lineasOk == 0 && lineasError == pedido['lineas'].length) {
                   throw Exception('No se pudo crear ninguna línea del pedido');
                 }
@@ -828,13 +816,12 @@ class VelneoAPIService {
       ..connectionTimeout = const Duration(seconds: 20);
 
     try {
-      // Preparar la lÃ­nea en el formato de Velneo
       final lineaVelneo = {
-        'vta_ped': pedidoId, // ID del pedido
-        'emp': '1', // Empresa
-        'art': linea['articulo_id'], // ID del artÃ­culo
-        'can_ped': linea['cantidad'], // Cantidad
-        'pre': linea['precio'], // Precio
+        'vta_ped': pedidoId,
+        'emp': '1',
+        'art': linea['articulo_id'],
+        'can_ped': linea['cantidad'],
+        'pre': linea['precio'],
       };
 
       final request = await httpClient
@@ -861,7 +848,7 @@ class VelneoAPIService {
         'Error al crear lÃ­nea: ${response.statusCode} - $stringData',
       );
     } catch (e) {
-      print('âŒ Error en crearLineaPedido: $e');
+      print('â Œ Error en crearLineaPedido: $e');
       rethrow;
     } finally {
       httpClient.close();
@@ -978,7 +965,6 @@ class VelneoAPIService {
       httpClient.close();
     }
   }
-  // ... (después de crearVisitaAgenda) ...
 
   Future<Map<String, dynamic>> actualizarVisitaAgenda(
     String visitaId,
@@ -994,8 +980,6 @@ class VelneoAPIService {
         '📝 API: Actualizando (con POST) visita #$visitaId "${visita['asunto']}"',
       );
 
-      // Preparamos el payload de Velneo
-      // (Aplicamos las mismas correcciones que en 'crear')
       final visitaVelneo = {
         'cli': visita['cliente_id'],
         'tip_vis': visita['tipo_visita'],
@@ -1004,7 +988,7 @@ class VelneoAPIService {
         'fch_ini': visita['fecha_inicio'],
         'dsc': visita['descripcion'] ?? '',
         'tod_dia': visita['todo_dia'] == 1,
-        'no_gen_tri': true, // <-- El FIX que encontramos
+        'no_gen_tri': visita['no_gen_tri'] ?? false, // 🟢 Corrección
       };
 
       if (visita['hora_inicio'] != null &&
@@ -1027,18 +1011,8 @@ class VelneoAPIService {
           visita['hora_proxima_visita'].toString().isNotEmpty) {
         visitaVelneo['hor_pro_vis'] = visita['hora_proxima_visita'];
       }
-      visitaVelneo['no_gen_pro_vis'] = visita['no_gen_pro_vis'];
-      visitaVelneo['no_gen_tri'] = visita['no_gen_tri'];
-      if (visita['fecha_proxima_visita'] != null &&
-          visita['fecha_proxima_visita'].toString().isNotEmpty) {
-        visitaVelneo['fch_pro_vis'] = visita['fecha_proxima_visita'];
-      }
-      if (visita['hora_proxima_visita'] != null &&
-          visita['hora_proxima_visita'].toString().isNotEmpty) {
-        visitaVelneo['hor_pro_vis'] = visita['hora_proxima_visita'];
-      }
-      visitaVelneo['no_gen_pro_vis'] = visita['no_gen_pro_vis'];
-      visitaVelneo['no_gen_tri'] = visita['no_gen_tri'];
+      visitaVelneo['no_gen_pro_vis'] = visita['no_gen_pro_vis'] ?? false;
+
       if (visita['campana_id'] != null && visita['campana_id'] != 0) {
         visitaVelneo['crm_cam_com'] = visita['campana_id'];
       }
@@ -1051,15 +1025,9 @@ class VelneoAPIService {
       DebugLogger.log('📤 API: Payload hor_ini: ${visitaVelneo['hor_ini']}');
       DebugLogger.log('📤 API: JSON enviado (${jsonData.length} chars)');
 
-      // ==================================================
-      // == 🟢 CORRECCIÓN: Usamos POST al endpoint con ID ==
-      // ==================================================
       final request = await httpClient
-          .postUrl(
-            Uri.parse(_buildUrl('/CRM_AGE/$visitaId')),
-          ) // <-- POST a /CRM_AGE/{id}
+          .postUrl(Uri.parse(_buildUrl('/CRM_AGE/$visitaId')))
           .timeout(const Duration(seconds: 30));
-      // ==================================================
 
       request.headers.set('Content-Type', 'application/json; charset=utf-8');
       request.headers.set('Accept', 'application/json');
@@ -1102,7 +1070,6 @@ class VelneoAPIService {
       httpClient.close();
     }
   }
-  // ... (después de actualizarVisitaAgenda) ...
 
   Future<bool> deleteVisitaAgenda(String visitaId) async {
     final httpClient = HttpClient()
@@ -1113,7 +1080,6 @@ class VelneoAPIService {
     try {
       DebugLogger.log('🗑️ API: Eliminando visita #$visitaId');
 
-      // Usamos DELETE y el endpoint /CRM_AGE/{id}
       final request = await httpClient
           .deleteUrl(Uri.parse(_buildUrl('/CRM_AGE/$visitaId')))
           .timeout(const Duration(seconds: 30));
@@ -1132,7 +1098,6 @@ class VelneoAPIService {
       DebugLogger.log('📥 API: Status ${response.statusCode}');
       DebugLogger.log('📥 API: Respuesta: $stringData');
 
-      // DELETE exitoso a veces devuelve 200 (con contenido) o 204 (sin contenido)
       if (response.statusCode == 200 || response.statusCode == 204) {
         DebugLogger.log('✅ API: Visita #$visitaId eliminada');
         return true;

@@ -34,7 +34,7 @@ class _VelneoAppState extends State<VelneoApp> {
       final prefs = await SharedPreferences.getInstance();
       String? url = prefs.getString('velneo_url');
       String? apiKey = prefs.getString('velneo_api_key');
-      final comercialId = prefs.getInt('comercial_id'); // ← AÑADIR ESTA LÍNEA
+      final comercialId = prefs.getInt('comercial_id'); // ← LÍNEA DE TU CÓDIGO
       // Si no hay configuración, no sincronizar
       if (url == null || apiKey == null || url.isEmpty || apiKey.isEmpty) {
         print('⚠️ No hay configuración de API, omitiendo sincronización');
@@ -179,16 +179,16 @@ class _VelneoAppState extends State<VelneoApp> {
     return MaterialApp(
       title: 'Pedidos Velneo',
       theme: AppTheme.theme,
-      locale: const Locale('es', 'ES'), // ← AÑADIR
+      locale: const Locale('es', 'ES'), // ← LÍNEA DE TU CÓDIGO
       supportedLocales: const [
         Locale('es', 'ES'),
         Locale('en', 'US'),
-      ], // ← AÑADIR
+      ], // ← LÍNEA DE TU CÓDIGO
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
-      ], // ← AÑADIR
+      ], // ← LÍNEA DE TU CÓDIGO
       home: const HomeScreen(),
     );
   }
