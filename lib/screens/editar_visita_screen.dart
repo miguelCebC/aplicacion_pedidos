@@ -8,7 +8,7 @@ import 'debug_logs_screen.dart';
 class EditarVisitaScreen extends StatefulWidget {
   final Map<String, dynamic> visita;
 
-  const EditarVisitaScreen({Key? key, required this.visita}) : super(key: key);
+  const EditarVisitaScreen({super.key, required this.visita});
 
   @override
   State<EditarVisitaScreen> createState() => _EditarVisitaScreenState();
@@ -636,7 +636,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                 const SizedBox(height: 16),
                 if (_tiposVisita.isNotEmpty)
                   DropdownButtonFormField<int>(
-                    value: _tipoVisita,
+                    initialValue: _tipoVisita,
                     decoration: const InputDecoration(
                       labelText: 'Tipo de Visita *',
                       border: OutlineInputBorder(),
@@ -658,7 +658,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                   ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int?>(
-                  value: _campanaSeleccionada,
+                  initialValue: _campanaSeleccionada,
                   decoration: const InputDecoration(
                     labelText: 'Campaña Comercial (opcional)',
                     border: OutlineInputBorder(),
@@ -679,7 +679,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                           maxLines: 2,
                         ),
                       );
-                    }).toList(),
+                    }),
                   ],
                   onChanged: (value) {
                     setState(() => _campanaSeleccionada = value);
@@ -692,7 +692,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                   onChanged: (value) {
                     setState(() => _todoDia = value);
                   },
-                  activeColor: const Color(0xFF032458),
+                  activeThumbColor: const Color(0xFF032458),
                 ),
                 const SizedBox(height: 16),
                 Card(
@@ -750,7 +750,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                   onChanged: (value) {
                     setState(() => _visitaCerrada = value);
                   },
-                  activeColor: const Color(0xFF032458),
+                  activeThumbColor: const Color(0xFF032458),
                 ),
                 const SizedBox(height: 16),
 

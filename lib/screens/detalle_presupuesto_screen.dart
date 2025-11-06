@@ -179,7 +179,7 @@ class _DetallePresupuestoScreenState extends State<DetallePresupuestoScreen> {
                       ),
                     ),
                   );
-                }).toList(),
+                }),
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(20),

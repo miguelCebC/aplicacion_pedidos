@@ -432,7 +432,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                         ),
                       ),
                     );
-                  }).toList(),
+                  }),
 
                 // Total
                 if (_lineas.isNotEmpty) ...[

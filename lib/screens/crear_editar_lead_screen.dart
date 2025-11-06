@@ -7,7 +7,7 @@ import '../widgets/buscar_cliente_dialog.dart';
 class CrearEditarLeadScreen extends StatefulWidget {
   final Map<String, dynamic>? lead; // null = crear nuevo, con datos = editar
 
-  const CrearEditarLeadScreen({Key? key, this.lead}) : super(key: key);
+  const CrearEditarLeadScreen({super.key, this.lead});
 
   @override
   State<CrearEditarLeadScreen> createState() => _CrearEditarLeadScreenState();
@@ -292,7 +292,7 @@ class _CrearEditarLeadScreenState extends State<CrearEditarLeadScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int>(
-                  value: _estado,
+                  initialValue: _estado,
                   decoration: const InputDecoration(
                     labelText: 'Estado *',
                     border: OutlineInputBorder(),
@@ -329,7 +329,7 @@ class _CrearEditarLeadScreenState extends State<CrearEditarLeadScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int>(
-                  value: _campanaSeleccionada,
+                  initialValue: _campanaSeleccionada,
                   decoration: const InputDecoration(
                     labelText: 'Campaña (opcional)',
                     border: OutlineInputBorder(),
@@ -351,7 +351,7 @@ class _CrearEditarLeadScreenState extends State<CrearEditarLeadScreen> {
                           maxLines: 1,
                         ),
                       );
-                    }).toList(),
+                    }),
                   ],
                   onChanged: (value) {
                     setState(() => _campanaSeleccionada = value);

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'database_helper.dart';
 import 'services/api_service.dart';
-import 'models/models.dart';
 import 'theme/app_theme.dart';
 import 'screens/home_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -24,7 +23,7 @@ class _VelneoAppState extends State<VelneoApp> {
   void initState() {
     super.initState();
     // Iniciar sincronización en segundo plano
-    _sincronizarEnSegundoPlano();
+    //_sincronizarEnSegundoPlano();
   }
 
   Future<void> _sincronizarEnSegundoPlano() async {
@@ -160,6 +159,54 @@ class _VelneoAppState extends State<VelneoApp> {
         await db.insertarAgendasLote(agendasLista.cast<Map<String, dynamic>>());
         print('   📅 ${agendasLista.length} eventos de agenda');
       }
+      // [Dentro de _sincronizarEnSegundoPlano en main.dart]
+
+      // ... (después de sincronizar comerciales)
+      print('💾 Guardando comerciales...');
+      await db.limpiarComerciales();
+      // ...
+
+      // 🟢 AÑADIR ESTA LÓGICA 🟢
+      // Sincronizar Pedidos y Presupuestos
+      print('📥 Descargando pedidos...');
+      final pedidosLista = await apiService.obtenerPedidos();
+      await db.limpiarPedidos(); // <-- Limpia pedidos Y líneas
+      await db.insertarPedidosLote(pedidosLista.cast<Map<String, dynamic>>());
+
+      int totalLineasPedido = 0;
+      for (var pedido in pedidosLista) {
+        final lineas = await apiService.obtenerLineasPedido(pedido['id']);
+        for (var linea in lineas) {
+          await db.insertarLineaPedido(linea);
+          totalLineasPedido++;
+        }
+      }
+      print('   📦 ${pedidosLista.length} pedidos y $totalLineasPedido líneas');
+
+      print('📥 Descargando presupuestos...');
+      final presupuestosLista = await apiService.obtenerPresupuestos();
+      await db.limpiarPresupuestos(); // <-- Limpia presupuestos Y líneas
+      await db.insertarPresupuestosLote(
+        presupuestosLista.cast<Map<String, dynamic>>(),
+      );
+
+      int totalLineasPresupuesto = 0;
+      for (var presupuesto in presupuestosLista) {
+        final lineas = await apiService.obtenerLineasPresupuesto(
+          presupuesto['id'],
+        );
+        for (var linea in lineas) {
+          await db.insertarLineaPresupuesto(linea);
+          totalLineasPresupuesto++;
+        }
+      }
+      print(
+        '   📋 ${presupuestosLista.length} presupuestos y $totalLineasPresupuesto líneas',
+      );
+      // 🟢 FIN DE LA NUEVA LÓGICA 🟢
+
+      // === SINCRONIZAR DATOS CRM ===
+      // ... (el resto de tu función) ...
       // Guardar timestamp de sincronización
       await prefs.setInt('ultima_sincronizacion', ahora);
       // Guardar timestamp de sincronización

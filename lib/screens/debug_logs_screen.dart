@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class DebugLogsScreen extends StatefulWidget {
-  const DebugLogsScreen({Key? key}) : super(key: key);
+  const DebugLogsScreen({super.key});
 
   @override
   State<DebugLogsScreen> createState() => _DebugLogsScreenState();
@@ -71,8 +71,8 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
         onPressed: () {
           setState(() {});
         },
-        child: const Icon(Icons.refresh),
         tooltip: 'Refrescar',
+        child: const Icon(Icons.refresh),
       ),
     );
   }

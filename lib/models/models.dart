@@ -2,11 +2,15 @@ class LineaPedidoData {
   final Map<String, dynamic> articulo;
   double cantidad;
   double precio;
+  final double descuento; // 🟢 AÑADIR
+  final double iva; // 🟢 AÑADIR
 
   LineaPedidoData({
     required this.articulo,
     required this.cantidad,
     required this.precio,
+    this.descuento = 0.0, // 🟢 AÑADIR
+    this.iva = 21.0,
   });
 }
 

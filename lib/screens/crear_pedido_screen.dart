@@ -434,7 +434,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                         ),
                       ),
                     );
-                  }).toList(),
+                  }),
 
                 // Total
                 if (_lineas.isNotEmpty) ...[

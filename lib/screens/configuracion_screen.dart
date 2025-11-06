@@ -394,14 +394,58 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       await db.limpiarAgenda();
       await db.insertarAgendasLote(agendasLista.cast<Map<String, dynamic>>());
       _addLog('✅ ${agendasLista.length} eventos de agenda guardados');
-
-      _addLog('🎉 Sincronización completada exitosamente');
+      // Después de sincronizar agenda, añade:
       setState(() {
-        _isSyncing = false;
-        _syncStatus = 'Completado';
-        _syncProgress = 1.0;
+        _syncProgress = 0.97;
+        _syncDetalle = 'Pedidos';
       });
 
+      // [DENTRO DE _sincronizarDatos en configuracion_screen.dart Y/O main.dart]
+
+      // --- PEDIDOS Y SUS LÍNEAS ---
+      setState(() {
+        _syncProgress = 0.97;
+        _syncDetalle = 'Pedidos';
+      });
+
+      _addLog('📥 Descargando pedidos...');
+      final pedidosLista = await apiService.obtenerPedidos();
+      await db.limpiarPedidos(); // Esto ya limpia pedidos Y líneas
+      await db.insertarPedidosLote(pedidosLista.cast<Map<String, dynamic>>());
+      _addLog('✅ ${pedidosLista.length} pedidos guardados');
+
+      // Descargar TODAS las líneas de una vez
+      _addLog('📥 Descargando TODAS las líneas de pedido...');
+      final todasLineasPedido = await apiService.obtenerTodasLineasPedido();
+      await db.insertarLineasPedidoLote(
+        todasLineasPedido.cast<Map<String, dynamic>>(),
+      );
+      _addLog('✅ ${todasLineasPedido.length} líneas de pedido guardadas');
+
+      // --- PRESUPUESTOS Y SUS LÍNEAS ---
+      setState(() {
+        _syncProgress = 0.98;
+        _syncDetalle = 'Presupuestos';
+      });
+
+      _addLog('📥 Descargando presupuestos...');
+      final presupuestosLista = await apiService.obtenerPresupuestos();
+      await db.limpiarPresupuestos(); // Esto ya limpia presupuestos Y líneas
+      await db.insertarPresupuestosLote(
+        presupuestosLista.cast<Map<String, dynamic>>(),
+      );
+      _addLog('✅ ${presupuestosLista.length} presupuestos guardados');
+
+      // Descargar TODAS las líneas de una vez
+      _addLog('📥 Descargando TODAS las líneas de presupuesto...');
+      final todasLineasPresupuesto = await apiService
+          .obtenerTodasLineasPresupuesto();
+      await db.insertarLineasPresupuestoLote(
+        todasLineasPresupuesto.cast<Map<String, dynamic>>(),
+      );
+      _addLog(
+        '✅ ${todasLineasPresupuesto.length} líneas de presupuesto guardadas',
+      );
       // Guardar timestamp de sincronización
       final prefsSync = await SharedPreferences.getInstance();
       await prefsSync.setInt(

@@ -6,11 +6,20 @@ import '../screens/debug_logs_screen.dart';
 class VelneoAPIService {
   final String baseUrl;
   final String apiKey;
-  late http.Client _client;
-  Function(String)? onLog;
+  final http.Client _client = http.Client();
+  final Function(String)? onLog; // ← AÑADIR ESTA LÍNEA
 
-  VelneoAPIService(this.baseUrl, this.apiKey, {this.onLog}) {
-    _client = http.Client();
+  VelneoAPIService(
+    this.baseUrl,
+    this.apiKey, {
+    this.onLog,
+  }); // ← MODIFICAR CONSTRUCTOR
+
+  void _log(String message) {
+    if (onLog != null) {
+      onLog!(message);
+    }
+    print(message);
   }
 
   static http.Client createHttpClient() {
@@ -334,6 +343,217 @@ class VelneoAPIService {
     } catch (e) {
       print('❌ Error en obtenerTiposVisita: $e');
       rethrow;
+    }
+  }
+  // Añade estos métodos en api_service.dart
+
+  Future<List<dynamic>> obtenerLineasPedido(int pedidoId) async {
+    try {
+      _log('📄 Descargando líneas del pedido $pedidoId...');
+
+      final url = _buildUrlWithParams('/VTA_PED_LIN_G', {
+        'vta_ped': pedidoId.toString(),
+        'page_size': '100',
+      });
+
+      _log('🌐 URL líneas pedido: $url');
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
+
+      _log('📥 Status code líneas pedido: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data['vta_ped_lin_g'] != null && data['vta_ped_lin_g'] is List) {
+          final lineasList = (data['vta_ped_lin_g'] as List).map((linea) {
+            _log(
+              '  → Línea: Art ${linea['art']} - Cant: ${linea['can_ped']} - Precio: ${linea['pre']}',
+            );
+            return {
+              //     👇 USA EL ID DE LA 'linea'
+              'pedido_id': linea['vta_ped'] ?? pedidoId, // <-- ✅ CORRECCIÓN
+              'articulo_id': linea['art'] ?? 0,
+              'cantidad': _convertirADouble(linea['can_ped']),
+              'precio': _convertirADouble(linea['pre']),
+            };
+          }).toList();
+
+          _log('✅ ${lineasList.length} líneas de pedido descargadas');
+          return lineasList;
+        } else {
+          _log('⚠️ No se encontraron líneas para el pedido $pedidoId');
+          return [];
+        }
+      }
+
+      throw Exception(
+        'Error al obtener líneas de pedido: ${response.statusCode}',
+      );
+    } catch (e) {
+      _log('❌ Error en obtenerLineasPedido: $e');
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> obtenerLineasPresupuesto(int presupuestoId) async {
+    try {
+      _log('📄 Descargando líneas del presupuesto $presupuestoId...');
+
+      final url = _buildUrlWithParams('/VTA_PRE_LIN_G', {
+        'vta_pre': presupuestoId.toString(),
+        'page_size': '100',
+      });
+
+      _log('🌐 URL líneas presupuesto: $url');
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
+
+      _log('📥 Status code líneas presupuesto: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data['vta_pre_lin_g'] != null && data['vta_pre_lin_g'] is List) {
+          final lineasList = (data['vta_pre_lin_g'] as List).map((linea) {
+            _log(
+              '  → Línea: Art ${linea['art']} - Cant: ${linea['can']} - Precio: ${linea['pre']}',
+            );
+            return {
+              //     👇 USA EL ID DE LA 'linea'
+              'presupuesto_id':
+                  linea['vta_pre'] ?? presupuestoId, // <-- ✅ CORRECCIÓN
+              'articulo_id': linea['art'] ?? 0,
+              'cantidad': _convertirADouble(linea['can']),
+              'precio': _convertirADouble(linea['pre']),
+            };
+          }).toList();
+
+          _log('✅ ${lineasList.length} líneas de presupuesto descargadas');
+          return lineasList;
+        } else {
+          _log(
+            '⚠️ No se encontraron líneas para el presupuesto $presupuestoId',
+          );
+          return [];
+        }
+      }
+
+      throw Exception(
+        'Error al obtener líneas de presupuesto: ${response.statusCode}',
+      );
+    } catch (e) {
+      _log('❌ Error en obtenerLineasPresupuesto: $e');
+      return [];
+    }
+  }
+  // [DENTRO DE services/api_service.dart, en la clase VelneoAPIService]
+
+  Future<List<dynamic>> obtenerTodasLineasPedido() async {
+    try {
+      _log('📄 Descargando TODAS las líneas de pedido...');
+
+      // Llamamos al endpoint sin el filtro 'vta_ped'
+      final url = _buildUrlWithParams('/VTA_PED_LIN_G', {
+        'page_size': '2000', // O un límite suficientemente alto
+      });
+
+      _log('🌐 URL líneas pedido: $url');
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 45));
+
+      _log('📥 Status code líneas pedido: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data['vta_ped_lin_g'] != null && data['vta_ped_lin_g'] is List) {
+          final lineasList = (data['vta_ped_lin_g'] as List).map((linea) {
+            // Asumiendo que las líneas también tienen 'por_dto' y 'por_iva'
+            // (Si los nombres de los campos son diferentes, ajústalos aquí)
+            return {
+              'pedido_id': linea['vta_ped'] ?? 0,
+              'articulo_id': linea['art'] ?? 0,
+              'cantidad': _convertirADouble(linea['can_ped']),
+              'precio': _convertirADouble(linea['pre']),
+              'por_descuento': _convertirADouble(
+                linea['por_dto'],
+              ), // 🟢 CAMPO AÑADIDO
+              'por_iva': _convertirADouble(
+                linea['por_iva_apl'],
+              ), // 🟢 CAMPO AÑADIDO (suposición)
+            };
+          }).toList();
+
+          _log('✅ ${lineasList.length} líneas de pedido descargadas');
+          return lineasList;
+        } else {
+          _log('⚠️ No se encontraron líneas de pedido');
+          return [];
+        }
+      }
+
+      throw Exception(
+        'Error al obtener líneas de pedido: ${response.statusCode}',
+      );
+    } catch (e) {
+      _log('❌ Error en obtenerTodasLineasPedido: $e');
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> obtenerTodasLineasPresupuesto() async {
+    try {
+      _log('📄 Descargando TODAS las líneas de presupuesto...');
+
+      // Llamamos al endpoint sin el filtro 'vta_pre'
+      final url = _buildUrlWithParams('/VTA_PRE_LIN_G', {
+        'page_size': '2000', // O un límite suficientemente alto
+      });
+
+      _log('🌐 URL líneas presupuesto: $url');
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 45));
+
+      _log('📥 Status code líneas presupuesto: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data['vta_pre_lin_g'] != null && data['vta_pre_lin_g'] is List) {
+          final lineasList = (data['vta_pre_lin_g'] as List).map((linea) {
+            // 🛑 ¡IMPORTANTE! Usamos el ID que viene en la línea
+            return {
+              'presupuesto_id':
+                  linea['vta_pre'] ?? 0, // <-- ASIGNACIÓN CORRECTA
+              'articulo_id': linea['art'] ?? 0,
+              'cantidad': _convertirADouble(linea['can']),
+              'precio': _convertirADouble(linea['pre']),
+            };
+          }).toList();
+
+          _log('✅ ${lineasList.length} líneas de presupuesto descargadas');
+          return lineasList;
+        } else {
+          _log('⚠️ No se encontraron líneas de presupuesto');
+          return [];
+        }
+      }
+
+      throw Exception(
+        'Error al obtener líneas de presupuesto: ${response.statusCode}',
+      );
+    } catch (e) {
+      _log('❌ Error en obtenerTodasLineasPresupuesto: $e');
+      return [];
     }
   }
 
@@ -680,31 +900,63 @@ class VelneoAPIService {
 
   Future<List<dynamic>> obtenerPedidos() async {
     try {
+      _log('📄 Descargando pedidos desde Velneo...');
+
+      final url = _buildUrlWithParams('/VTA_PED_G', {
+        'page': '1',
+        'page_size': '100',
+      });
+
+      _log('🌐 URL: $url');
+
       final response = await _getWithSSL(
-        _buildUrl('/PED_V'),
+        url,
       ).timeout(const Duration(seconds: 30));
 
+      _log('📥 Status code: ${response.statusCode}');
+
+      if (response.body.length > 500) {
+        _log(
+          '📥 Response (primeros 500 chars): ${response.body.substring(0, 500)}...',
+        );
+      } else {
+        _log('📥 Response completo: ${response.body}');
+      }
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+        if (data['vta_ped_g'] != null && data['vta_ped_g'] is List) {
+          final listaPedidos = data['vta_ped_g'] as List;
 
-        if (data['ped_v'] != null) {
-          return (data['ped_v'] as List).map((pedido) {
+          final pedidosList = listaPedidos.map((pedido) {
             return {
               'id': pedido['id'],
-              'cliente_id': pedido['cliente_id'] ?? pedido['cli_id'],
-              'fecha': pedido['fecha'] ?? DateTime.now().toIso8601String(),
-              'estado': pedido['estado'] ?? 'Pendiente',
-              'observaciones': pedido['observaciones'] ?? '',
-              'total': _convertirADouble(pedido['total']),
+              'cliente_id': pedido['clt'] ?? 0,
+              'cmr': pedido['cmr'] ?? 0,
+              'fecha': pedido['fch'] ?? DateTime.now().toIso8601String(),
+              'numero': pedido['num_ped'] ?? '', // 🟢 CAMPO AÑADIDO
+              'estado': pedido['est'] ?? '',
+              'observaciones': pedido['obs'] ?? '',
+              'total': _convertirADouble(
+                pedido['tot_ped'],
+              ), // 🟢 TOTAL YA INCLUIDO
               'sincronizado': 1,
             };
           }).toList();
+
+          _log('✅ ${pedidosList.length} pedidos procesados correctamente');
+          return pedidosList;
+        } else {
+          _log(
+            '⚠️ No se encontró campo vta_ped_g en la respuesta o está vacío',
+          );
+          _log('⚠️ Estructura recibida: ${data.toString().substring(0, 200)}');
+          return [];
         }
-        return [];
       }
-      throw Exception('Error al obtener pedidos: ${response.statusCode}');
+
+      throw Exception('Error HTTP ${response.statusCode}');
     } catch (e) {
-      print('Error en obtenerPedidos: $e');
+      _log('❌ Error en obtenerPedidos: $e');
       rethrow;
     }
   }
@@ -1276,24 +1528,44 @@ class VelneoAPIService {
 
   Future<List<dynamic>> obtenerPresupuestos() async {
     try {
-      print('📄 Descargando presupuestos...');
+      _log('📄 Descargando presupuestos desde Velneo...');
 
       final url = _buildUrlWithParams('/VTA_PRE_G', {
         'page': '1',
         'page_size': '100',
       });
 
+      _log('🌐 URL: $url');
+
       final response = await _getWithSSL(
         url,
       ).timeout(const Duration(seconds: 30));
 
+      _log('📥 Status code: ${response.statusCode}');
+
+      if (response.body.length > 500) {
+        _log(
+          '📥 Response (primeros 500 chars): ${response.body.substring(0, 500)}...',
+        );
+      } else {
+        _log('📥 Response completo: ${response.body}');
+      }
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
 
+        _log('🔍 Keys en respuesta: ${data.keys.join(", ")}');
+
         if (data['vta_pre_g'] != null && data['vta_pre_g'] is List) {
-          final presupuestosList = (data['vta_pre_g'] as List).map((
-            presupuesto,
-          ) {
+          final listaPresupuestos = data['vta_pre_g'] as List;
+          _log(
+            '📋 Encontrados ${listaPresupuestos.length} presupuestos en vta_pre_g',
+          );
+
+          final presupuestosList = listaPresupuestos.map((presupuesto) {
+            _log(
+              '  → Presupuesto ID: ${presupuesto['id']} - Cliente: ${presupuesto['clt']} - Comercial: ${presupuesto['cmr']}',
+            );
             return {
               'id': presupuesto['id'],
               'cliente_id': presupuesto['clt'] ?? 0,
@@ -1310,14 +1582,22 @@ class VelneoAPIService {
             };
           }).toList();
 
-          print('✅ ${presupuestosList.length} presupuestos descargados');
+          _log(
+            '✅ ${presupuestosList.length} presupuestos procesados correctamente',
+          );
           return presupuestosList;
+        } else {
+          _log(
+            '⚠️ No se encontró campo vta_pre_g en la respuesta o está vacío',
+          );
+          _log('⚠️ Estructura recibida: ${data.toString().substring(0, 200)}');
+          return [];
         }
       }
 
-      throw Exception('Error al obtener presupuestos: ${response.statusCode}');
+      throw Exception('Error HTTP ${response.statusCode}');
     } catch (e) {
-      print('❌ Error en obtenerPresupuestos: $e');
+      _log('❌ Error en obtenerPresupuestos: $e');
       rethrow;
     }
   }

@@ -8,7 +8,7 @@ import '../services/api_service.dart';
 class DetalleVisitaScreen extends StatefulWidget {
   final Map<String, dynamic> visita;
 
-  const DetalleVisitaScreen({Key? key, required this.visita}) : super(key: key);
+  const DetalleVisitaScreen({super.key, required this.visita});
 
   @override
   State<DetalleVisitaScreen> createState() => _DetalleVisitaScreenState();

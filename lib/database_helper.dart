@@ -20,7 +20,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       dbFilePath,
-      version: 5, // 🟢 VERSIÓN INCREMENTADA A 5
+      version: 6, // 🟢 VERSIÓN INCREMENTADA A 6
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -170,6 +170,7 @@ class DatabaseHelper {
         usuario_id INTEGER,
         cmr INTEGER,
         fecha TEXT NOT NULL,
+        numero TEXT, 
         estado TEXT,
         observaciones TEXT,
         total REAL,
@@ -186,6 +187,8 @@ class DatabaseHelper {
         articulo_id INTEGER NOT NULL,
         cantidad REAL NOT NULL,
         precio REAL NOT NULL,
+        por_descuento REAL DEFAULT 0,
+        por_iva REAL DEFAULT 0,
         FOREIGN KEY (pedido_id) REFERENCES pedidos (id),
         FOREIGN KEY (articulo_id) REFERENCES articulos (id)
       )
@@ -336,8 +339,10 @@ class DatabaseHelper {
 
   Future<void> limpiarPresupuestos() async {
     final db = await database;
-    await db.delete('presupuestos');
+    // 1. Borrar primero las líneas (dependencia)
     await db.delete('lineas_presupuesto');
+    // 2. Borrar después los presupuestos (principal)
+    await db.delete('presupuestos');
   }
 
   Future<int> actualizarPresupuestoSincronizado(
@@ -583,6 +588,30 @@ class DatabaseHelper {
         } catch (e2) {
           print('❌ Error fatal en migración v5: $e2');
         }
+      }
+    }
+    if (oldVersion < 6) {
+      try {
+        await db.execute('ALTER TABLE pedidos ADD COLUMN numero TEXT');
+        print('✅ Columna numero agregada a pedidos');
+      } catch (e) {
+        print('⚠️ Columna numero ya existe en pedidos: $e');
+      }
+      try {
+        await db.execute(
+          'ALTER TABLE lineas_pedido ADD COLUMN por_descuento REAL DEFAULT 0',
+        );
+        print('✅ Columna por_descuento agregada a lineas_pedido');
+      } catch (e) {
+        print('⚠️ Columna por_descuento ya existe en lineas_pedido: $e');
+      }
+      try {
+        await db.execute(
+          'ALTER TABLE lineas_pedido ADD COLUMN por_iva REAL DEFAULT 0',
+        );
+        print('✅ Columna por_iva agregada a lineas_pedido');
+      } catch (e) {
+        print('⚠️ Columna por_iva ya existe en lineas_pedido: $e');
       }
     }
     // 🟢 FIN DE NUEVA LÓGICA DE UPGRADE
@@ -1009,6 +1038,56 @@ class DatabaseHelper {
     );
   }
 
+  Future<void> insertarPedidosLote(List<Map<String, dynamic>> pedidos) async {
+    final db = await database;
+    final batch = db.batch();
+
+    for (var pedido in pedidos) {
+      batch.insert(
+        'pedidos',
+        pedido,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+
+    await batch.commit(noResult: true);
+  }
+  // [DENTRO DE database_helper.dart, en la clase DatabaseHelper]
+
+  Future<void> insertarLineasPedidoLote(
+    List<Map<String, dynamic>> lineas,
+  ) async {
+    final db = await database;
+    final batch = db.batch();
+
+    for (var linea in lineas) {
+      batch.insert(
+        'lineas_pedido',
+        linea,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> insertarLineasPresupuestoLote(
+    List<Map<String, dynamic>> lineas,
+  ) async {
+    final db = await database;
+    final batch = db.batch();
+
+    for (var linea in lineas) {
+      batch.insert(
+        'lineas_presupuesto',
+        linea,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+
+    await batch.commit(noResult: true);
+  }
+
   Future<void> limpiarBaseDatos() async {
     final db = await database;
     await db.delete('lineas_pedido');
@@ -1024,6 +1103,14 @@ class DatabaseHelper {
     await db.delete('poblaciones');
     await db.delete('zonas_tecnicas');
     await db.delete('provincias');
+  }
+
+  Future<void> limpiarPedidos() async {
+    final db = await database;
+    // 1. Borrar primero las líneas (dependencia)
+    await db.delete('lineas_pedido');
+    // 2. Borrar después los pedidos (principal)
+    await db.delete('pedidos');
   }
 
   Future<void> cargarDatosPrueba() async {

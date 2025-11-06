@@ -4,7 +4,7 @@ import '../database_helper.dart';
 import 'crear_editar_lead_screen.dart';
 
 class LeadsScreen extends StatefulWidget {
-  const LeadsScreen({Key? key}) : super(key: key);
+  const LeadsScreen({super.key});
 
   @override
   State<LeadsScreen> createState() => _LeadsScreenState();
@@ -13,8 +13,8 @@ class LeadsScreen extends StatefulWidget {
 class _LeadsScreenState extends State<LeadsScreen> {
   List<Map<String, dynamic>> _leads = [];
   List<Map<String, dynamic>> _leadsFiltrados = [];
-  Map<int, String> _clientesNombres = {};
-  Map<int, String> _campanasNombres = {};
+  final Map<int, String> _clientesNombres = {};
+  final Map<int, String> _campanasNombres = {};
   bool _isLoading = true;
   int? _comercialId;
   String _comercialNombre = 'Sin comercial';

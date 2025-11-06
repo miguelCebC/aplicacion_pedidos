@@ -10,7 +10,7 @@ import '../services/api_service.dart';
 import 'presupuestos_screen.dart';
 
 class CRMCalendarioScreen extends StatefulWidget {
-  const CRMCalendarioScreen({Key? key}) : super(key: key);
+  const CRMCalendarioScreen({super.key});
 
   @override
   State<CRMCalendarioScreen> createState() => _CRMCalendarioScreenState();
@@ -30,7 +30,7 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
   int _visitasPendientes = 0;
 
   // Mapa para cachear nombres de clientes
-  Map<int, String> _clientesNombres = {};
+  final Map<int, String> _clientesNombres = {};
 
   @override
   bool get wantKeepAlive => true;

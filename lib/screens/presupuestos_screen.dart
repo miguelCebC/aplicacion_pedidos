@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
+import '../services/api_service.dart';
 import 'crear_presupuesto_screen.dart';
 import 'detalle_presupuesto_screen.dart';
 
@@ -13,7 +15,7 @@ class PresupuestosScreen extends StatefulWidget {
 class _PresupuestosScreenState extends State<PresupuestosScreen> {
   List<Map<String, dynamic>> _presupuestos = [];
   List<Map<String, dynamic>> _presupuestosFiltrados = [];
-  Map<int, String> _clientesNombres = {};
+  final Map<int, String> _clientesNombres = {};
   bool _isLoading = true;
   final TextEditingController _searchController = TextEditingController();
 
@@ -33,21 +35,54 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
   Future<void> _cargarDatos() async {
     setState(() => _isLoading = true);
 
-    final db = DatabaseHelper.instance;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final comercialId = prefs.getInt('comercial_id');
+      String url = prefs.getString('velneo_url') ?? '';
+      final String apiKey = prefs.getString('velneo_api_key') ?? '';
 
-    final presupuestos = await db.obtenerPresupuestos();
+      if (url.isNotEmpty && apiKey.isNotEmpty) {
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          url = 'https://$url';
+        }
 
-    final clientes = await db.obtenerClientes();
-    _clientesNombres.clear();
-    for (var cliente in clientes) {
-      _clientesNombres[cliente['id'] as int] = cliente['nombre'] as String;
+        // Sincronizar desde Velneo
+        final apiService = VelneoAPIService(url, apiKey);
+        final presupuestosVelneo = await apiService.obtenerPresupuestos();
+
+        // Guardar en BD local
+        final db = DatabaseHelper.instance;
+        await db.insertarPresupuestosLote(
+          presupuestosVelneo.cast<Map<String, dynamic>>(),
+        );
+      }
+
+      // Cargar desde BD local
+      final db = DatabaseHelper.instance;
+      List<Map<String, dynamic>> presupuestos = await db.obtenerPresupuestos();
+
+      // Filtrar por comercial si está seleccionado
+      if (comercialId != null) {
+        presupuestos = presupuestos
+            .where((p) => p['comercial_id'] == comercialId)
+            .toList();
+      }
+
+      final clientes = await db.obtenerClientes();
+      _clientesNombres.clear();
+      for (var cliente in clientes) {
+        _clientesNombres[cliente['id'] as int] = cliente['nombre'] as String;
+      }
+
+      setState(() {
+        _presupuestos = presupuestos;
+        _presupuestosFiltrados = presupuestos;
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error al cargar presupuestos: $e');
+      setState(() => _isLoading = false);
     }
-
-    setState(() {
-      _presupuestos = presupuestos;
-      _presupuestosFiltrados = presupuestos;
-      _isLoading = false;
-    });
   }
 
   void _filtrarPresupuestos() {
@@ -91,11 +126,11 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
 
   Color _getColorEstado(String? estado) {
     switch (estado?.toUpperCase()) {
-      case 'A': // Aceptado
+      case 'A':
         return Colors.green;
-      case 'P': // Pendiente
+      case 'P':
         return Colors.orange;
-      case 'R': // Rechazado
+      case 'R':
         return Colors.red;
       default:
         return Colors.grey;
@@ -173,7 +208,7 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: Row(
                     children: [
-                      const Icon(Icons.description, size: 20),
+                      const Icon(Icons.request_quote, size: 20),
                       const SizedBox(width: 8),
                       Text(
                         '${_presupuestosFiltrados.length} presupuesto(s) encontrado(s)',
@@ -194,7 +229,7 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
                             children: [
                               Icon(
                                 _searchController.text.isEmpty
-                                    ? Icons.description_outlined
+                                    ? Icons.request_quote_outlined
                                     : Icons.search_off,
                                 size: 64,
                                 color: Colors.grey,
@@ -203,9 +238,9 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
                               Text(
                                 _searchController.text.isEmpty
                                     ? 'No hay presupuestos'
-                                    : 'No se encontraron presupuestos',
+                                    : 'No se encontraron resultados',
                                 style: const TextStyle(
-                                  fontSize: 16,
+                                  fontSize: 18,
                                   color: Colors.grey,
                                 ),
                               ),
@@ -213,21 +248,19 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
                           ),
                         )
                       : ListView.builder(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(8),
                           itemCount: _presupuestosFiltrados.length,
                           itemBuilder: (context, index) {
                             final presupuesto = _presupuestosFiltrados[index];
-                            final estado = presupuesto['estado'];
 
                             return Card(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              elevation: 2,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
                               ),
                               child: InkWell(
-                                onTap: () async {
-                                  await Navigator.push(
+                                onTap: () {
+                                  Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) =>
@@ -236,123 +269,145 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
                                           ),
                                     ),
                                   );
-                                  _cargarDatos();
                                 },
-                                borderRadius: BorderRadius.circular(12),
                                 child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Row(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Container(
-                                        width: 56,
-                                        height: 56,
-                                        decoration: BoxDecoration(
-                                          color: _getColorEstado(
-                                            estado,
-                                          ).withOpacity(0.1),
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: Icon(
-                                          _getIconoEstado(estado),
-                                          color: _getColorEstado(estado),
-                                          size: 28,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Expanded(
-                                                  child: Text(
-                                                    presupuesto['numero'] ??
-                                                        'Presupuesto #${presupuesto['id']}',
-                                                    style: const TextStyle(
-                                                      fontSize: 16,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ),
-                                                Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 4,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: _getColorEstado(
-                                                      estado,
-                                                    ),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          12,
-                                                        ),
-                                                  ),
-                                                  child: Text(
-                                                    _getNombreEstado(estado),
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 10,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            _getIconoEstado(
+                                              presupuesto['estado'],
                                             ),
-                                            const SizedBox(height: 4),
-                                            Text(
+                                            color: _getColorEstado(
+                                              presupuesto['estado'],
+                                            ),
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            presupuesto['numero'] ??
+                                                'Presupuesto #${presupuesto['id']}',
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          const Spacer(),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: _getColorEstado(
+                                                presupuesto['estado'],
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            child: Text(
+                                              _getNombreEstado(
+                                                presupuesto['estado'],
+                                              ),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.business,
+                                            size: 16,
+                                            color: Colors.grey,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
                                               _obtenerNombreCliente(
                                                 presupuesto['cliente_id'],
                                               ),
-                                              style: TextStyle(
+                                              style: const TextStyle(
                                                 fontSize: 14,
-                                                color: Colors.grey[600],
                                               ),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.calendar_today,
-                                                  size: 14,
-                                                  color: Colors.grey[600],
-                                                ),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  _formatearFecha(
-                                                    presupuesto['fecha'],
-                                                  ),
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.grey[600],
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          Text(
-                                            '${(presupuesto['total'] ?? 0).toStringAsFixed(2)} €',
-                                            style: const TextStyle(
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.bold,
-                                              color: Color(0xFF032458),
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
-                                          const SizedBox(height: 4),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
                                           const Icon(
-                                            Icons.chevron_right,
+                                            Icons.calendar_today,
+                                            size: 16,
                                             color: Colors.grey,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            _formatearFecha(
+                                              presupuesto['fecha'],
+                                            ),
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (presupuesto['observaciones'] !=
+                                              null &&
+                                          presupuesto['observaciones']
+                                              .toString()
+                                              .isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          presupuesto['observaciones'],
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey,
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                      const Divider(),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          const Text(
+                                            'Total:',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                          Row(
+                                            children: [
+                                              Text(
+                                                '${(presupuesto['total'] ?? 0).toStringAsFixed(2)} €',
+                                                style: const TextStyle(
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Color(0xFF032458),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              const Icon(
+                                                Icons.chevron_right,
+                                                color: Colors.grey,
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),

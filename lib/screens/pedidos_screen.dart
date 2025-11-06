@@ -15,7 +15,7 @@ class PedidosScreen extends StatefulWidget {
 class _PedidosScreenState extends State<PedidosScreen> {
   List<Map<String, dynamic>> _pedidos = [];
   List<Map<String, dynamic>> _pedidosFiltrados = [];
-  Map<int, String> _clientesNombres = {};
+  final Map<int, String> _clientesNombres = {};
   bool _isLoading = true;
   bool _sincronizando = false;
   final TextEditingController _searchController = TextEditingController();

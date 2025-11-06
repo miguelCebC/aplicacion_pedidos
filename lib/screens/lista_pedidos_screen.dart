@@ -14,6 +14,7 @@ class ListaPedidosScreen extends StatefulWidget {
 class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
   List<Map<String, dynamic>> _pedidos = [];
   bool _sincronizando = false;
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -22,9 +23,47 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
   }
 
   Future<void> _cargarPedidos() async {
-    final db = DatabaseHelper.instance;
-    final pedidos = await db.obtenerPedidos();
-    setState(() => _pedidos = pedidos);
+    setState(() => _isLoading = true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final comercialId = prefs.getInt('comercial_id');
+      String url = prefs.getString('velneo_url') ?? '';
+      final String apiKey = prefs.getString('velneo_api_key') ?? '';
+
+      if (url.isNotEmpty && apiKey.isNotEmpty) {
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          url = 'https://$url';
+        }
+
+        // Sincronizar desde Velneo
+        final apiService = VelneoAPIService(url, apiKey);
+        final pedidosVelneo = await apiService.obtenerPedidos();
+
+        // Guardar en BD local
+        final db = DatabaseHelper.instance;
+        await db.insertarPedidosLote(
+          pedidosVelneo.cast<Map<String, dynamic>>(),
+        );
+      }
+
+      // Cargar desde BD local
+      final db = DatabaseHelper.instance;
+      List<Map<String, dynamic>> pedidos = await db.obtenerPedidos();
+
+      // Filtrar por comercial si está seleccionado
+      if (comercialId != null) {
+        pedidos = pedidos.where((p) => p['cmr'] == comercialId).toList();
+      }
+
+      setState(() {
+        _pedidos = pedidos;
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error al cargar pedidos: $e');
+      setState(() => _isLoading = false);
+    }
   }
 
   String _formatearFecha(String fecha) {
@@ -37,7 +76,6 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
   }
 
   Future<void> _sincronizarPedidosPendientes() async {
-    // Obtener pedidos no sincronizados
     final pedidosPendientes = _pedidos
         .where((p) => p['sincronizado'] == 0)
         .toList();
@@ -53,13 +91,12 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
       return;
     }
 
-    // Confirmar sincronización
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Sincronizar Pedidos'),
         content: Text(
-          'Â¿Deseas sincronizar ${pedidosPendientes.length} pedido(s) pendiente(s) con Velneo?',
+          '¿Deseas sincronizar ${pedidosPendientes.length} pedido(s) pendiente(s) con Velneo?',
         ),
         actions: [
           TextButton(
@@ -78,7 +115,6 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
 
     setState(() => _sincronizando = true);
 
-    // Forzar actualización de UI antes de operación pesada
     await Future.delayed(const Duration(milliseconds: 100));
 
     int exitosos = 0;
@@ -86,14 +122,10 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
     final errores = <String>[];
 
     try {
-      // Obtener configuración desde SharedPreferences
       final prefs = await SharedPreferences.getInstance();
-      String url =
-          prefs.getString('velneo_url') ??
-          'tecerp.nunsys.com:4311/TORRAL/TecERPv7_dat_dat/v1';
-      final String apiKey = prefs.getString('velneo_api_key') ?? '1234';
+      String url = prefs.getString('velneo_url') ?? '';
+      final String apiKey = prefs.getString('velneo_api_key') ?? '';
 
-      // Asegurar que la URL tenga el protocolo
       if (!url.startsWith('http://') && !url.startsWith('https://')) {
         url = 'https://$url';
       }
@@ -105,14 +137,12 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
         try {
           print('Sincronizando pedido #${pedido['id']}...');
 
-          // Obtener lÃ­neas del pedido
           final lineas = await db.obtenerLineasPedido(pedido['id']);
 
           if (lineas.isEmpty) {
-            throw Exception('El pedido no tiene lÃ­neas');
+            throw Exception('El pedido no tiene líneas');
           }
 
-          // Preparar datos del pedido para Velneo
           final pedidoData = {
             'cliente_id': pedido['cliente_id'],
             'fecha': pedido['fecha'],
@@ -129,22 +159,19 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
                 .toList(),
           };
 
-          // Enviar a Velneo con timeout
           final resultado = await apiService
               .crearPedido(pedidoData)
               .timeout(const Duration(seconds: 45));
 
-          print('âœ“ Pedido #${pedido['id']} sincronizado: $resultado');
+          print('✓ Pedido #${pedido['id']} sincronizado: $resultado');
 
-          // Marcar como sincronizado
           await db.actualizarPedidoSincronizado(pedido['id'], 1);
 
           exitosos++;
 
-          // PequeÃ±a pausa entre pedidos
           await Future.delayed(const Duration(milliseconds: 500));
         } catch (e) {
-          print('âœ— Error al sincronizar pedido ${pedido['id']}: $e');
+          print('✗ Error al sincronizar pedido ${pedido['id']}: $e');
           fallidos++;
           final errorMsg = e.toString().replaceAll('Exception: ', '');
           errores.add('Pedido #${pedido['id']}: $errorMsg');
@@ -156,12 +183,11 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
 
       if (!mounted) return;
 
-      // Mostrar resultado
       if (fallidos == 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'âœ“ $exitosos pedido(s) sincronizado(s) correctamente',
+              '✓ $exitosos pedido(s) sincronizado(s) correctamente',
             ),
             backgroundColor: const Color(0xFF032458),
             duration: const Duration(seconds: 3),
@@ -177,8 +203,8 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('âœ“ Exitosos: $exitosos'),
-                  Text('âœ— Fallidos: $fallidos'),
+                  Text('✓ Exitosos: $exitosos'),
+                  Text('✗ Fallidos: $fallidos'),
                   if (errores.isNotEmpty) ...[
                     const SizedBox(height: 16),
                     const Text(
@@ -260,7 +286,9 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
           ),
         ],
       ),
-      body: _pedidos.isEmpty
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _pedidos.isEmpty
           ? const Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -300,36 +328,16 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
                         color: Colors.white,
                       ),
                     ),
-                    title: Text(
-                      'Pedido #${pedido['id']}',
+                    title: Text('Pedido #${pedido['id']}'),
+                    subtitle: Text(
+                      '${_formatearFecha(pedido['fecha'])}\n${pedido['observaciones'] ?? 'Sin observaciones'}',
+                    ),
+                    trailing: Text(
+                      '${pedido['total'].toStringAsFixed(2)} €',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF032458),
+                        fontSize: 16,
                       ),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Cliente ID: ${pedido['cliente_id']}'),
-                        Text(_formatearFecha(pedido['fecha'])),
-                        if (pedido['total'] != null)
-                          Text(
-                            'Total: ${pedido['total'].toStringAsFixed(2)}€',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF032458),
-                            ),
-                          ),
-                      ],
-                    ),
-                    trailing: Chip(
-                      label: Text(
-                        esSincronizado ? 'Sincronizado' : 'Pendiente',
-                        style: const TextStyle(fontSize: 11),
-                      ),
-                      backgroundColor: esSincronizado
-                          ? const Color(0xFFCAD3E2)
-                          : const Color(0xFFFFC107),
                     ),
                     onTap: () {
                       Navigator.push(

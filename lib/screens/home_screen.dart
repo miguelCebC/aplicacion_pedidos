@@ -6,7 +6,7 @@ import 'configuracion_screen.dart';
 import 'crm_calendario_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();

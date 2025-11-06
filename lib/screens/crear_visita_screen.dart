@@ -8,7 +8,7 @@ import 'debug_logs_screen.dart';
 class CrearVisitaScreen extends StatefulWidget {
   final DateTime? fechaSeleccionada;
 
-  const CrearVisitaScreen({Key? key, this.fechaSeleccionada}) : super(key: key);
+  const CrearVisitaScreen({super.key, this.fechaSeleccionada});
 
   @override
   State<CrearVisitaScreen> createState() => _CrearVisitaScreenState();
@@ -458,7 +458,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '✅ Visita #${idVelneo} creada ${crearVisitaManualmente ? "y próxima visita generada" : ""}',
+            '✅ Visita #$idVelneo creada ${crearVisitaManualmente ? "y próxima visita generada" : ""}',
           ),
           backgroundColor: const Color(0xFF032458),
           action: SnackBarAction(
@@ -588,7 +588,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                 const SizedBox(height: 16),
                 if (_tiposVisita.isNotEmpty)
                   DropdownButtonFormField<int>(
-                    value: _tipoVisita,
+                    initialValue: _tipoVisita,
                     decoration: const InputDecoration(
                       labelText: 'Tipo de Visita *',
                       border: OutlineInputBorder(),
@@ -620,7 +620,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int?>(
-                  value: _campanaSeleccionada,
+                  initialValue: _campanaSeleccionada,
                   decoration: const InputDecoration(
                     labelText: 'Campaña Comercial (opcional)',
                     border: OutlineInputBorder(),
@@ -641,7 +641,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                           maxLines: 2,
                         ),
                       );
-                    }).toList(),
+                    }),
                   ],
                   onChanged: (value) {
                     setState(() => _campanaSeleccionada = value);
@@ -654,7 +654,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   onChanged: (value) {
                     setState(() => _todoDia = value);
                   },
-                  activeColor: const Color(0xFF032458),
+                  activeThumbColor: const Color(0xFF032458),
                 ),
                 const SizedBox(height: 16),
                 Card(
@@ -712,7 +712,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   onChanged: (value) {
                     setState(() => _visitaCerrada = value);
                   },
-                  activeColor: const Color(0xFF032458),
+                  activeThumbColor: const Color(0xFF032458),
                 ),
                 const SizedBox(height: 16),
 
