@@ -69,11 +69,11 @@ class _PedidosScreenState extends State<PedidosScreen> {
           final observaciones = (pedido['observaciones'] ?? '')
               .toString()
               .toLowerCase();
-          final id = pedido['id'].toString();
+          final numero = (pedido['numero'] ?? '').toString();
 
           return clienteNombre.contains(query) ||
               observaciones.contains(query) ||
-              id.contains(query);
+              numero.contains(query);
         }).toList();
       }
     });
@@ -316,7 +316,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
                     controller: _searchController,
                     decoration: InputDecoration(
                       hintText:
-                          'Buscar pedidos por cliente, ID u observaciones...',
+                          'Buscar pedidos por cliente, número u observaciones...',
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
@@ -384,6 +384,13 @@ class _PedidosScreenState extends State<PedidosScreen> {
                             final pedido = _pedidosFiltrados[index];
                             final esSincronizado = pedido['sincronizado'] == 1;
 
+                            // Obtener el número del pedido
+                            final numeroPedido =
+                                pedido['numero']?.toString().trim() ?? '';
+                            final textoNumero = numeroPedido.isNotEmpty
+                                ? numeroPedido
+                                : 'Pedido #${pedido['id']}';
+
                             return Card(
                               margin: const EdgeInsets.only(bottom: 12),
                               elevation: 2,
@@ -437,11 +444,16 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                           children: [
                                             Row(
                                               children: [
-                                                Text(
-                                                  'Pedido #${pedido['id']}',
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.bold,
+                                                Flexible(
+                                                  child: Text(
+                                                    textoNumero,
+                                                    style: const TextStyle(
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
                                                   ),
                                                 ),
                                                 const SizedBox(width: 8),
@@ -483,6 +495,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                                 fontSize: 14,
                                                 color: Colors.grey[600],
                                               ),
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                             const SizedBox(height: 8),
                                             Row(
@@ -493,13 +506,17 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                                   color: Colors.grey[600],
                                                 ),
                                                 const SizedBox(width: 4),
-                                                Text(
-                                                  _formatearFecha(
-                                                    pedido['fecha'],
-                                                  ),
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.grey[600],
+                                                Flexible(
+                                                  child: Text(
+                                                    _formatearFecha(
+                                                      pedido['fecha'],
+                                                    ),
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: Colors.grey[600],
+                                                    ),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
                                                   ),
                                                 ),
                                               ],

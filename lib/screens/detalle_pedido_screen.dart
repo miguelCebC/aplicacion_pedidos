@@ -78,7 +78,7 @@ class _DetallePedidoScreenState extends State<DetallePedidoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pedido #${widget.pedido['id']}')),
+      appBar: AppBar(title: Text('Pedido ${widget.pedido['numero']}')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -140,7 +140,7 @@ class _DetallePedidoScreenState extends State<DetallePedidoScreen> {
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'LÃ­neas del Pedido',
+                  'Líneas del Pedido',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
