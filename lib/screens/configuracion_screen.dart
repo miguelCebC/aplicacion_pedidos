@@ -452,7 +452,33 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         'ultima_sincronizacion',
         DateTime.now().millisecondsSinceEpoch,
       );
+      setState(() {
+        _syncProgress = 0.99;
+        _syncDetalle = 'Tarifas';
+      });
 
+      _addLog('📥 Descargando tarifas por cliente...');
+      final tarifasClienteLista = await apiService.obtenerTarifasCliente();
+      await db.limpiarTarifasCliente();
+      await db.insertarTarifasClienteLote(
+        tarifasClienteLista.cast<Map<String, dynamic>>(),
+      );
+      _addLog('✅ ${tarifasClienteLista.length} tarifas por cliente guardadas');
+
+      _addLog('📥 Descargando tarifas por artículo...');
+      final tarifasArticuloLista = await apiService.obtenerTarifasArticulo();
+      await db.limpiarTarifasArticulo();
+      await db.insertarTarifasArticuloLote(
+        tarifasArticuloLista.cast<Map<String, dynamic>>(),
+      );
+      setState(() {
+        _syncProgress = 1;
+        _syncDetalle = 'Completado';
+      });
+
+      _addLog(
+        '✅ ${tarifasArticuloLista.length} tarifas por artículo guardadas',
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

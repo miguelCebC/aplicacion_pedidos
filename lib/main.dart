@@ -4,6 +4,7 @@ import 'database_helper.dart';
 import 'services/api_service.dart';
 import 'theme/app_theme.dart';
 import 'screens/home_screen.dart';
+import 'screens/login_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() {
@@ -226,17 +227,32 @@ class _VelneoAppState extends State<VelneoApp> {
     return MaterialApp(
       title: 'Pedidos Velneo',
       theme: AppTheme.theme,
-      locale: const Locale('es', 'ES'), // ← LÍNEA DE TU CÓDIGO
-      supportedLocales: const [
-        Locale('es', 'ES'),
-        Locale('en', 'US'),
-      ], // ← LÍNEA DE TU CÓDIGO
+      locale: const Locale('es', 'ES'),
+      supportedLocales: const [Locale('es', 'ES'), Locale('en', 'US')],
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
-      ], // ← LÍNEA DE TU CÓDIGO
-      home: const HomeScreen(),
+      ],
+      home: FutureBuilder<bool>(
+        future: _verificarPrimeraVez(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+
+          final esPrimeraVez = snapshot.data ?? true;
+          return esPrimeraVez ? const LoginScreen() : const HomeScreen();
+        },
+      ),
     );
+  }
+
+  Future<bool> _verificarPrimeraVez() async {
+    final prefs = await SharedPreferences.getInstance();
+    final comercialId = prefs.getInt('comercial_id');
+    return comercialId == null;
   }
 }

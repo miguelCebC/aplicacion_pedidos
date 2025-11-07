@@ -97,8 +97,23 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
   String _formatearHora(String? horaStr) {
     if (horaStr == null || horaStr.isEmpty) return 'No especificada';
     try {
-      final hora = DateTime.parse(horaStr);
-      return '${hora.hour.toString().padLeft(2, '0')}:${hora.minute.toString().padLeft(2, '0')}';
+      // Si es formato "HH:MM:SS" o "HH:MM"
+      if (horaStr.contains(':')) {
+        final parts = horaStr.split(':');
+        if (parts.length >= 2) {
+          final hora = int.parse(parts[0]).toString().padLeft(2, '0');
+          final minuto = int.parse(parts[1]).toString().padLeft(2, '0');
+          return '$hora:$minuto';
+        }
+      }
+
+      // Si viene como fecha completa ISO, parsear fecha
+      if (horaStr.contains('T') || horaStr.contains('-')) {
+        final dt = DateTime.parse(horaStr);
+        return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      }
+
+      return 'No especificada';
     } catch (e) {
       return horaStr;
     }

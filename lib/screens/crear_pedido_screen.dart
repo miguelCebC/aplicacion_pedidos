@@ -38,18 +38,37 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
   }
 
   Future<void> _agregarLinea() async {
+    if (_clienteSeleccionado == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Primero selecciona un cliente')),
+      );
+      return;
+    }
+
     final articulo = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (dialogContext) => const BuscarArticuloDialog(),
     );
 
     if (articulo != null) {
+      // 🟢 NUEVA LÓGICA: Obtener precio y descuento según jerarquía
+      final db = DatabaseHelper.instance;
+      final precioInfo = await db.obtenerPrecioYDescuento(
+        _clienteSeleccionado!['id'],
+        articulo['id'],
+        articulo['precio'] ?? 0.0,
+      );
+
+      if (!mounted) return;
+
       final lineaConPrecio = await showDialog<LineaPedidoData>(
         context: context,
         builder: (dialogContext) => EditarLineaDialog(
           articulo: articulo,
           cantidad: 1,
-          precio: articulo['precio'] ?? 0.0,
+          precio: precioInfo['precio']!,
+          descuento: precioInfo['descuento']!,
+          iva: 21.0,
         ),
       );
 
@@ -75,6 +94,8 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
         articulo: lineaActual.articulo,
         cantidad: lineaActual.cantidad,
         precio: lineaActual.precio,
+        descuento: lineaActual.descuento,
+        iva: lineaActual.iva,
       ),
     );
 
@@ -86,10 +107,11 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
   }
 
   double _calcularTotal() {
-    return _lineas.fold(
-      0,
-      (total, linea) => total + (linea.cantidad * linea.precio),
-    );
+    return _lineas.fold(0, (total, linea) {
+      final subtotal = linea.cantidad * linea.precio;
+      final descuento = subtotal * (linea.descuento / 100);
+      return total + (subtotal - descuento);
+    });
   }
 
   Future<void> _guardarPedido() async {
@@ -141,6 +163,8 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                 'articulo_id': linea.articulo['id'],
                 'cantidad': linea.cantidad,
                 'precio': linea.precio,
+                'por_descuento': linea.descuento,
+                'por_iva': linea.iva,
               },
             )
             .toList(),
@@ -180,6 +204,8 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
           'articulo_id': linea.articulo['id'],
           'cantidad': linea.cantidad,
           'precio': linea.precio,
+          'por_descuento': linea.descuento,
+          'por_iva': linea.iva,
         });
       }
 
@@ -333,6 +359,9 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                   ..._lineas.asMap().entries.map((entry) {
                     final index = entry.key;
                     final linea = entry.value;
+                    final subtotal = linea.cantidad * linea.precio;
+                    final descuento = subtotal * (linea.descuento / 100);
+                    final totalLinea = subtotal - descuento;
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
@@ -353,82 +382,34 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                           linea.articulo['nombre'],
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Código: ${linea.articulo['codigo']}'),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Text(
-                                  'Cantidad: ${linea.cantidad}',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                const SizedBox(width: 16),
-                                Text(
-                                  'Precio: ${linea.precio.toStringAsFixed(2)}€',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ],
+                        subtitle: Text(
+                          '${linea.articulo['codigo']} - ${linea.cantidad} x ${linea.precio.toStringAsFixed(2)}€'
+                          '${linea.descuento > 0 ? ' (-${linea.descuento.toStringAsFixed(1)}%)' : ''}',
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  '${(linea.cantidad * linea.precio).toStringAsFixed(2)}€',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF032458),
-                                  ),
-                                ),
-                              ],
+                            Text(
+                              '${totalLinea.toStringAsFixed(2)}€',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF032458),
+                              ),
                             ),
                             const SizedBox(width: 8),
-                            PopupMenuButton(
-                              icon: const Icon(Icons.more_vert),
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                  value: 'edit',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.edit, size: 20),
-                                      SizedBox(width: 8),
-                                      Text('Editar'),
-                                    ],
-                                  ),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'delete',
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.delete,
-                                        size: 20,
-                                        color: Colors.red,
-                                      ),
-                                      SizedBox(width: 8),
-                                      Text(
-                                        'Eliminar',
-                                        style: TextStyle(color: Colors.red),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              onSelected: (value) {
-                                if (value == 'edit') {
-                                  _editarLinea(index);
-                                } else if (value == 'delete') {
-                                  _eliminarLinea(index);
-                                }
-                              },
+                            IconButton(
+                              icon: const Icon(Icons.edit, size: 20),
+                              onPressed: () => _editarLinea(index),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, size: 20),
+                              color: Colors.red,
+                              onPressed: () => _eliminarLinea(index),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
                             ),
                           ],
                         ),

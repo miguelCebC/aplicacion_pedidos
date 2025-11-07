@@ -1840,6 +1840,188 @@ class VelneoAPIService {
       httpClient.close();
     }
   }
+  // En lib/services/api_service.dart, añadir estas dos funciones después de obtenerTodasLineasPresupuesto():
+
+  Future<List<dynamic>> obtenerTarifasCliente() async {
+    try {
+      final allTarifas = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+      int totalCount = 0;
+
+      _log('📄 Descargando tarifas por cliente...');
+
+      while (true) {
+        final url = _buildUrlWithParams('/VTA_TAR_CLI_G', {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+        });
+
+        _log('  📥 Página $page - URL: $url');
+
+        try {
+          final response = await _getWithSSL(
+            url,
+          ).timeout(const Duration(seconds: 45));
+          _log('  📥 Status code: ${response.statusCode}');
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+
+            if (data['total_count'] != null) {
+              totalCount = data['total_count'];
+              _log('  📊 Total registros en servidor: $totalCount');
+            }
+
+            if (data['vta_tar_cli_g'] != null &&
+                data['vta_tar_cli_g'] is List) {
+              final tarifasList = (data['vta_tar_cli_g'] as List).map((tarifa) {
+                return {
+                  'id': tarifa['id'],
+                  'cliente_id': tarifa['clt'] ?? 0,
+                  'articulo_id': tarifa['art'] ?? 0,
+                  'precio': _convertirADouble(tarifa['pre']),
+                  'por_descuento': _convertirADouble(tarifa['por_dto']),
+                };
+              }).toList();
+
+              if (tarifasList.isEmpty) {
+                _log('  🏁 No hay más tarifas por cliente');
+                break;
+              }
+
+              allTarifas.addAll(tarifasList);
+              _log(
+                '  ✅ Página $page: ${tarifasList.length} tarifas (Acumulado: ${allTarifas.length}/$totalCount)',
+              );
+
+              if (tarifasList.length < pageSize) {
+                _log('  🏁 Última página (${tarifasList.length} < $pageSize)');
+                break;
+              }
+
+              if (totalCount > 0 && allTarifas.length >= totalCount) {
+                _log(
+                  '  🏁 Total alcanzado (${allTarifas.length} >= $totalCount)',
+                );
+                break;
+              }
+
+              page++;
+              await Future.delayed(const Duration(milliseconds: 200));
+            } else {
+              _log('  ⚠️ No se encontraron tarifas por cliente');
+              break;
+            }
+          } else {
+            throw Exception('Error HTTP ${response.statusCode}');
+          }
+        } catch (e) {
+          _log('  ❌ Error en página $page: $e');
+          if (allTarifas.isEmpty) {
+            rethrow;
+          }
+          break;
+        }
+      }
+
+      _log('✅ TOTAL tarifas por cliente descargadas: ${allTarifas.length}');
+      return allTarifas;
+    } catch (e) {
+      _log('❌ Error en obtenerTarifasCliente: $e');
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> obtenerTarifasArticulo() async {
+    try {
+      final allTarifas = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+      int totalCount = 0;
+
+      _log('📄 Descargando tarifas por artículo...');
+
+      while (true) {
+        final url = _buildUrlWithParams('/VTA_TAR_ART_G', {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+        });
+
+        _log('  📥 Página $page - URL: $url');
+
+        try {
+          final response = await _getWithSSL(
+            url,
+          ).timeout(const Duration(seconds: 45));
+          _log('  📥 Status code: ${response.statusCode}');
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+
+            if (data['total_count'] != null) {
+              totalCount = data['total_count'];
+              _log('  📊 Total registros en servidor: $totalCount');
+            }
+
+            if (data['vta_tar_art_g'] != null &&
+                data['vta_tar_art_g'] is List) {
+              final tarifasList = (data['vta_tar_art_g'] as List).map((tarifa) {
+                return {
+                  'id': tarifa['id'],
+                  'articulo_id': tarifa['art'] ?? 0,
+                  'precio': _convertirADouble(tarifa['pre']),
+                  'por_descuento': _convertirADouble(tarifa['por_dto']),
+                };
+              }).toList();
+
+              if (tarifasList.isEmpty) {
+                _log('  🏁 No hay más tarifas por artículo');
+                break;
+              }
+
+              allTarifas.addAll(tarifasList);
+              _log(
+                '  ✅ Página $page: ${tarifasList.length} tarifas (Acumulado: ${allTarifas.length}/$totalCount)',
+              );
+
+              if (tarifasList.length < pageSize) {
+                _log('  🏁 Última página (${tarifasList.length} < $pageSize)');
+                break;
+              }
+
+              if (totalCount > 0 && allTarifas.length >= totalCount) {
+                _log(
+                  '  🏁 Total alcanzado (${allTarifas.length} >= $totalCount)',
+                );
+                break;
+              }
+
+              page++;
+              await Future.delayed(const Duration(milliseconds: 200));
+            } else {
+              _log('  ⚠️ No se encontraron tarifas por artículo');
+              break;
+            }
+          } else {
+            throw Exception('Error HTTP ${response.statusCode}');
+          }
+        } catch (e) {
+          _log('  ❌ Error en página $page: $e');
+          if (allTarifas.isEmpty) {
+            rethrow;
+          }
+          break;
+        }
+      }
+
+      _log('✅ TOTAL tarifas por artículo descargadas: ${allTarifas.length}');
+      return allTarifas;
+    } catch (e) {
+      _log('❌ Error en obtenerTarifasArticulo: $e');
+      return [];
+    }
+  }
 
   Future<bool> probarConexion() async {
     try {

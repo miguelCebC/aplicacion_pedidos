@@ -38,18 +38,37 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
   }
 
   Future<void> _agregarLinea() async {
+    if (_clienteSeleccionado == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Primero selecciona un cliente')),
+      );
+      return;
+    }
+
     final articulo = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (dialogContext) => const BuscarArticuloDialog(),
     );
 
     if (articulo != null) {
+      // 🟢 NUEVA LÓGICA: Obtener precio y descuento según jerarquía
+      final db = DatabaseHelper.instance;
+      final precioInfo = await db.obtenerPrecioYDescuento(
+        _clienteSeleccionado!['id'],
+        articulo['id'],
+        articulo['precio'] ?? 0.0,
+      );
+
+      if (!mounted) return;
+
       final lineaConPrecio = await showDialog<LineaPedidoData>(
         context: context,
         builder: (dialogContext) => EditarLineaDialog(
           articulo: articulo,
           cantidad: 1,
-          precio: articulo['precio'] ?? 0.0,
+          precio: precioInfo['precio']!,
+          descuento: precioInfo['descuento']!,
+          iva: 21.0,
         ),
       );
 
@@ -75,6 +94,8 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
         articulo: lineaActual.articulo,
         cantidad: lineaActual.cantidad,
         precio: lineaActual.precio,
+        descuento: lineaActual.descuento,
+        iva: lineaActual.iva,
       ),
     );
 

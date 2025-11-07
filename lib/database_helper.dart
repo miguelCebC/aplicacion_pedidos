@@ -225,6 +225,27 @@ class DatabaseHelper {
     FOREIGN KEY (articulo_id) REFERENCES articulos (id)
   )
 ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS tarifas_cliente (
+        id INTEGER PRIMARY KEY,
+        cliente_id INTEGER NOT NULL,
+        articulo_id INTEGER NOT NULL,
+        precio REAL NOT NULL,
+        por_descuento REAL DEFAULT 0,
+        FOREIGN KEY (cliente_id) REFERENCES clientes (id),
+        FOREIGN KEY (articulo_id) REFERENCES articulos (id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS tarifas_articulo (
+        id INTEGER PRIMARY KEY,
+        articulo_id INTEGER NOT NULL,
+        precio REAL NOT NULL,
+        por_descuento REAL DEFAULT 0,
+        FOREIGN KEY (articulo_id) REFERENCES articulos (id)
+      )
+    ''');
 
     print('✅ Base de datos creada correctamente');
   }
@@ -1111,6 +1132,109 @@ class DatabaseHelper {
     await db.delete('lineas_pedido');
     // 2. Borrar después los pedidos (principal)
     await db.delete('pedidos');
+  }
+
+  Future<void> insertarTarifasClienteLote(
+    List<Map<String, dynamic>> tarifas,
+  ) async {
+    final db = await database;
+    final batch = db.batch();
+
+    for (var tarifa in tarifas) {
+      batch.insert(
+        'tarifas_cliente',
+        tarifa,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> insertarTarifasArticuloLote(
+    List<Map<String, dynamic>> tarifas,
+  ) async {
+    final db = await database;
+    final batch = db.batch();
+
+    for (var tarifa in tarifas) {
+      batch.insert(
+        'tarifas_articulo',
+        tarifa,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> limpiarTarifasCliente() async {
+    final db = await database;
+    await db.delete('tarifas_cliente');
+  }
+
+  Future<void> limpiarTarifasArticulo() async {
+    final db = await database;
+    await db.delete('tarifas_articulo');
+  }
+
+  Future<Map<String, dynamic>?> obtenerTarifaCliente(
+    int clienteId,
+    int articuloId,
+  ) async {
+    final db = await database;
+    final result = await db.query(
+      'tarifas_cliente',
+      where: 'cliente_id = ? AND articulo_id = ?',
+      whereArgs: [clienteId, articuloId],
+    );
+
+    if (result.isNotEmpty) {
+      return result.first;
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> obtenerTarifaArticulo(int articuloId) async {
+    final db = await database;
+    final result = await db.query(
+      'tarifas_articulo',
+      where: 'articulo_id = ?',
+      whereArgs: [articuloId],
+    );
+
+    if (result.isNotEmpty) {
+      return result.first;
+    }
+    return null;
+  }
+
+  // Función para obtener precio y descuento según la jerarquía
+  Future<Map<String, double>> obtenerPrecioYDescuento(
+    int clienteId,
+    int articuloId,
+    double pvpBase,
+  ) async {
+    // 1. Buscar en tarifas por cliente
+    final tarifaCliente = await obtenerTarifaCliente(clienteId, articuloId);
+    if (tarifaCliente != null) {
+      return {
+        'precio': tarifaCliente['precio'] as double,
+        'descuento': tarifaCliente['por_descuento'] as double,
+      };
+    }
+
+    // 2. Buscar en tarifas por artículo
+    final tarifaArticulo = await obtenerTarifaArticulo(articuloId);
+    if (tarifaArticulo != null) {
+      return {
+        'precio': tarifaArticulo['precio'] as double,
+        'descuento': tarifaArticulo['por_descuento'] as double,
+      };
+    }
+
+    // 3. Usar PVP del artículo sin descuento
+    return {'precio': pvpBase, 'descuento': 0.0};
   }
 
   Future<void> cargarDatosPrueba() async {

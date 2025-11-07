@@ -106,8 +106,22 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
 
   void _cargarEventosDelDia(DateTime dia) {
     final diaKey = DateTime(dia.year, dia.month, dia.day);
+    final eventos = _eventos[diaKey] ?? [];
+
+    // Ordenar eventos por hora_inicio
+    eventos.sort((a, b) {
+      final horaA = a['hora_inicio']?.toString() ?? '';
+      final horaB = b['hora_inicio']?.toString() ?? '';
+
+      // Si alguna hora está vacía, poner al final
+      if (horaA.isEmpty) return 1;
+      if (horaB.isEmpty) return -1;
+
+      return horaA.compareTo(horaB);
+    });
+
     setState(() {
-      _eventosDelDia = _eventos[diaKey] ?? [];
+      _eventosDelDia = eventos;
     });
   }
 
