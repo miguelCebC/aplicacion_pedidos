@@ -101,7 +101,6 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       _addLog('🌐 Conectando a: $finalUrl');
-
       final apiKey = _apiKeyController.text.trim();
       final apiService = VelneoAPIService(finalUrl, apiKey);
 

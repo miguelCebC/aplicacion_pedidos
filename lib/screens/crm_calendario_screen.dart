@@ -7,7 +7,6 @@ import 'crear_visita_screen.dart';
 import 'leads_screen.dart';
 import 'presupuestos_screen.dart';
 import '../services/api_service.dart';
-import 'presupuestos_screen.dart';
 
 class CRMCalendarioScreen extends StatefulWidget {
   const CRMCalendarioScreen({super.key});
@@ -421,8 +420,9 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
                                           DetalleVisitaScreen(visita: evento),
                                     ),
                                   );
+                                  // 🟢 RECARGAR SI SE EDITÓ O ELIMINÓ
                                   if (resultado == true) {
-                                    _cargarEventos();
+                                    await _cargarEventos();
                                   }
                                 },
                                 child: ListTile(

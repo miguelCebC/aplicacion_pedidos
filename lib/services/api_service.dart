@@ -2023,6 +2023,57 @@ class VelneoAPIService {
     }
   }
 
+  Future<Map<String, dynamic>> obtenerComercialPorId(int comercialId) async {
+    final endpoint = '/ENT_M/$comercialId';
+    final url = _buildUrl(endpoint); // _buildUrl ya añade la api_key
+
+    _log('🔍 Verificando comercial ID $comercialId en $url');
+
+    final response = await _getWithSSL(
+      url,
+    ).timeout(const Duration(seconds: 30));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+
+      // La API de Velneo para un ID suele devolver una lista con un solo elemento
+      if (data['ent_m'] != null &&
+          data['ent_m'] is List &&
+          (data['ent_m'] as List).isNotEmpty) {
+        final entidad = (data['ent_m'] as List).first;
+
+        // Comprobamos que el ID encontrado sea realmente un comercial
+        if (entidad['es_cmr'] == true) {
+          _log('✅ Comercial ID $comercialId encontrado: ${entidad['nom_fis']}');
+          return {
+            'id': entidad['id'],
+            'nombre': entidad['nom_fis'] ?? 'Sin nombre',
+            'email': entidad['eml'] ?? '',
+            'telefono': entidad['tlf'] ?? '',
+            'direccion': entidad['dir'] ?? '',
+          };
+        } else {
+          _log(
+            '❌ ID $comercialId encontrado, pero no está marcado como comercial (es_cmr=false)',
+          );
+          throw Exception('El ID $comercialId no pertenece a un comercial');
+        }
+      } else {
+        // No se encontró la entidad
+        _log('❌ No se encontró ningún registro con ID $comercialId en /ENT_M');
+        throw Exception('No se encontró ningún comercial con ID $comercialId');
+      }
+    } else if (response.statusCode == 404) {
+      _log('❌ No se encontró ningún registro con ID $comercialId (404)');
+      throw Exception('No se encontró ningún comercial con ID $comercialId');
+    } else {
+      _log('❌ Error HTTP ${response.statusCode} al verificar comercial');
+      throw Exception(
+        'Error HTTP ${response.statusCode} al verificar comercial',
+      );
+    }
+  }
+
   Future<bool> probarConexion() async {
     try {
       final url = _buildUrl('/ART_M');
