@@ -1,20 +1,25 @@
+import 'iva_config.dart';
+
 class LineaPedidoData {
   final Map<String, dynamic> articulo;
   double cantidad;
   double precio;
-  final double descuento; // 🟢 AÑADIR
-  final double iva; // 🟢 AÑADIR
+  final double descuento;
+  final String tipoIva; // G/R/S/X
 
   LineaPedidoData({
     required this.articulo,
     required this.cantidad,
     required this.precio,
-    this.descuento = 0.0, // 🟢 AÑADIR
-    this.iva = 21.0,
+    this.descuento = 0.0,
+    this.tipoIva = 'G', // Por defecto General
   });
+
+  // Método helper para obtener el porcentaje de IVA
+  double get porcentajeIva => IvaConfig.obtenerPorcentaje(tipoIva);
 }
 
-// Clase auxiliar para lÃ­neas de detalle
+// Clase auxiliar para líneas de detalle
 class LineaDetalle {
   final String articuloNombre;
   final String articuloCodigo;

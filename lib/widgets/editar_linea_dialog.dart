@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
+import '../models/iva_config.dart';
 
 class EditarLineaDialog extends StatefulWidget {
   final Map<String, dynamic> articulo;
   final double cantidad;
   final double precio;
-  final double descuento; // 🟢 AÑADIR
-  final double iva; // 🟢 AÑADIR
+  final double descuento;
+  final String tipoIva;
 
   const EditarLineaDialog({
     super.key,
     required this.articulo,
     required this.cantidad,
     required this.precio,
-    this.descuento = 0.0, // 🟢 AÑADIR
-    this.iva = 21.0, // 🟢 AÑADIR
+    this.descuento = 0.0,
+    this.tipoIva = 'G',
   });
 
   @override
@@ -24,8 +25,8 @@ class EditarLineaDialog extends StatefulWidget {
 class _EditarLineaDialogState extends State<EditarLineaDialog> {
   late TextEditingController _cantidadController;
   late TextEditingController _precioController;
-  late TextEditingController _descuentoController; // 🟢 AÑADIR
-  late TextEditingController _ivaController; // 🟢 AÑADIR
+  late TextEditingController _descuentoController;
+  late String _tipoIvaSeleccionado;
 
   @override
   void initState() {
@@ -35,19 +36,24 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
     );
     _precioController = TextEditingController(text: widget.precio.toString());
     _descuentoController = TextEditingController(
-      text: widget.descuento.toString(), // 🟢 AÑADIR
+      text: widget.descuento.toString(),
     );
-    _ivaController = TextEditingController(
-      text: widget.iva.toString(), // 🟢 AÑADIR
-    );
+    _tipoIvaSeleccionado = widget.tipoIva;
+    _cargarConfiguracionIva();
+  }
+
+  Future<void> _cargarConfiguracionIva() async {
+    await IvaConfig.cargarConfiguracion();
+    if (mounted) {
+      setState(() {}); // Refrescar para mostrar porcentajes actualizados
+    }
   }
 
   @override
   void dispose() {
     _cantidadController.dispose();
     _precioController.dispose();
-    _descuentoController.dispose(); // 🟢 AÑADIR
-    _ivaController.dispose(); // 🟢 AÑADIR
+    _descuentoController.dispose();
     super.dispose();
   }
 
@@ -56,7 +62,6 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
     return AlertDialog(
       title: const Text('Editar Línea'),
       content: SingleChildScrollView(
-        // 🟢 Envuelto para evitar overflow
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -91,7 +96,7 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
                 decimal: true,
               ),
             ),
-            const SizedBox(height: 16), // 🟢 INICIO CAMPOS NUEVOS
+            const SizedBox(height: 16),
             TextField(
               controller: _descuentoController,
               decoration: const InputDecoration(
@@ -103,16 +108,24 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
               ),
             ),
             const SizedBox(height: 16),
-            TextField(
-              controller: _ivaController,
+            DropdownButtonFormField<String>(
+              value: _tipoIvaSeleccionado,
               decoration: const InputDecoration(
-                labelText: 'IVA (%)',
+                labelText: 'Tipo de IVA',
                 border: OutlineInputBorder(),
               ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-            ), // 🟢 FIN CAMPOS NUEVOS
+              items: IvaConfig.obtenerTipos().map((tipo) {
+                return DropdownMenuItem(
+                  value: tipo,
+                  child: Text(IvaConfig.obtenerNombre(tipo)),
+                );
+              }).toList(),
+              onChanged: (valor) {
+                setState(() {
+                  _tipoIvaSeleccionado = valor!;
+                });
+              },
+            ),
           ],
         ),
       ),
@@ -125,19 +138,16 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
           onPressed: () {
             final cantidad = double.tryParse(_cantidadController.text) ?? 1;
             final precio = double.tryParse(_precioController.text) ?? 0;
-            final descuento =
-                double.tryParse(_descuentoController.text) ?? 0; // 🟢 AÑADIR
-            final iva = double.tryParse(_ivaController.text) ?? 21; // 🟢 AÑADIR
+            final descuento = double.tryParse(_descuentoController.text) ?? 0;
 
             Navigator.pop(
               context,
               LineaPedidoData(
-                // 🟢 Asegúrate de que el modelo acepte esto
                 articulo: widget.articulo,
                 cantidad: cantidad,
                 precio: precio,
                 descuento: descuento,
-                iva: iva,
+                tipoIva: _tipoIvaSeleccionado,
               ),
             );
           },

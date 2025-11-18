@@ -51,7 +51,6 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
     );
 
     if (articulo != null) {
-      // 🟢 NUEVA LÓGICA: Obtener precio y descuento según jerarquía
       final db = DatabaseHelper.instance;
       final precioInfo = await db.obtenerPrecioYDescuento(
         _clienteSeleccionado!['id'],
@@ -68,7 +67,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
           cantidad: 1,
           precio: precioInfo['precio']!,
           descuento: precioInfo['descuento']!,
-          iva: 21.0,
+          tipoIva: 'G', // Por defecto General
         ),
       );
 
@@ -95,7 +94,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
         cantidad: lineaActual.cantidad,
         precio: lineaActual.precio,
         descuento: lineaActual.descuento,
-        iva: lineaActual.iva,
+        tipoIva: lineaActual.tipoIva,
       ),
     );
 
@@ -106,12 +105,26 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
     }
   }
 
-  double _calcularTotal() {
+  double _calcularBaseImponible() {
     return _lineas.fold(0, (total, linea) {
       final subtotal = linea.cantidad * linea.precio;
       final descuento = subtotal * (linea.descuento / 100);
       return total + (subtotal - descuento);
     });
+  }
+
+  double _calcularTotalIva() {
+    return _lineas.fold(0, (totalIva, linea) {
+      final subtotal = linea.cantidad * linea.precio;
+      final descuento = subtotal * (linea.descuento / 100);
+      final baseLinea = subtotal - descuento;
+      final ivaLinea = baseLinea * (linea.porcentajeIva / 100);
+      return totalIva + ivaLinea;
+    });
+  }
+
+  double _calcularTotal() {
+    return _calcularBaseImponible() + _calcularTotalIva();
   }
 
   Future<void> _guardarPedido() async {
@@ -160,11 +173,11 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
         'lineas': _lineas
             .map(
               (linea) => {
-                'articulo_id': linea.articulo['id'],
-                'cantidad': linea.cantidad,
-                'precio': linea.precio,
-                'por_descuento': linea.descuento,
-                'por_iva': linea.iva,
+                'art': linea.articulo['id'],
+                'can_ped': linea.cantidad,
+                'pre_ven': linea.precio,
+                'por_dto': linea.descuento,
+                'reg_iva_vt_imp_pla': linea.tipoIva, // G/R/S/X para pedidos
               },
             )
             .toList(),
@@ -205,7 +218,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
           'cantidad': linea.cantidad,
           'precio': linea.precio,
           'por_descuento': linea.descuento,
-          'por_iva': linea.iva,
+          'por_iva': linea.porcentajeIva,
         });
       }
 
@@ -312,6 +325,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                       label: const Text('Agregar'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF032458),
+                        foregroundColor: Colors.white,
                       ),
                     ),
                   ],
@@ -361,7 +375,9 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                     final linea = entry.value;
                     final subtotal = linea.cantidad * linea.precio;
                     final descuento = subtotal * (linea.descuento / 100);
-                    final totalLinea = subtotal - descuento;
+                    final baseLinea = subtotal - descuento;
+                    final ivaLinea = baseLinea * (linea.porcentajeIva / 100);
+                    final totalLinea = baseLinea + ivaLinea;
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
@@ -384,106 +400,168 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                         ),
                         subtitle: Text(
                           '${linea.articulo['codigo']} - ${linea.cantidad} x ${linea.precio.toStringAsFixed(2)}€'
-                          '${linea.descuento > 0 ? ' (-${linea.descuento.toStringAsFixed(1)}%)' : ''}',
+                          '${linea.descuento > 0 ? ' (-${linea.descuento}%)' : ''}'
+                          '\nIVA: ${linea.tipoIva} (${linea.porcentajeIva}%)',
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              '${totalLinea.toStringAsFixed(2)}€',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF032458),
-                              ),
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  '${totalLinea.toStringAsFixed(2)}€',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF032458),
+                                  ),
+                                ),
+                                if (linea.descuento > 0 ||
+                                    linea.porcentajeIva > 0)
+                                  Text(
+                                    'Base: ${baseLinea.toStringAsFixed(2)}€',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                              ],
                             ),
                             const SizedBox(width: 8),
-                            IconButton(
-                              icon: const Icon(Icons.edit, size: 20),
-                              onPressed: () => _editarLinea(index),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete, size: 20),
-                              color: Colors.red,
-                              onPressed: () => _eliminarLinea(index),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
+                            PopupMenuButton(
+                              icon: const Icon(Icons.more_vert),
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'editar',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.edit, size: 20),
+                                      SizedBox(width: 8),
+                                      Text('Editar'),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'eliminar',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.delete,
+                                        size: 20,
+                                        color: Colors.red,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Eliminar',
+                                        style: TextStyle(color: Colors.red),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              onSelected: (value) {
+                                if (value == 'editar') {
+                                  _editarLinea(index);
+                                } else if (value == 'eliminar') {
+                                  _eliminarLinea(index);
+                                }
+                              },
                             ),
                           ],
                         ),
+                        isThreeLine: true,
                       ),
                     );
                   }),
 
-                // Total
-                if (_lineas.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF032458).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: const Color(0xFF032458),
-                        width: 2,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                const SizedBox(height: 16),
+
+                // Card de totales con desglose
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 16),
+                  color: const Color(0xFF032458).withOpacity(0.05),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
                       children: [
-                        const Text(
-                          'TOTAL',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF032458),
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Base Imponible:'),
+                            Text(
+                              '${_calcularBaseImponible().toStringAsFixed(2)}€',
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                          ],
                         ),
-                        Text(
-                          '${_calcularTotal().toStringAsFixed(2)} €',
-                          style: const TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF032458),
-                          ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('IVA:'),
+                            Text(
+                              '${_calcularTotalIva().toStringAsFixed(2)}€',
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'TOTAL:',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '${_calcularTotal().toStringAsFixed(2)}€',
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF032458),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
-                ],
-
-                const SizedBox(height: 24),
+                ),
 
                 // Botón guardar
-                ElevatedButton.icon(
+                ElevatedButton(
                   onPressed: _guardando ? null : _guardarPedido,
-                  icon: _guardando
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF032458),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: _guardando
                       ? const SizedBox(
-                          width: 20,
                           height: 20,
+                          width: 20,
                           child: CircularProgressIndicator(
-                            color: Colors.white,
                             strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
                           ),
                         )
-                      : const Icon(Icons.save),
-                  label: const Text('Crear Pedido'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.all(16),
-                    backgroundColor: const Color(0xFF032458),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  '* Campos obligatorios',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                    fontStyle: FontStyle.italic,
-                  ),
-                  textAlign: TextAlign.center,
+                      : const Text(
+                          'GUARDAR PEDIDO',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ],
             ),

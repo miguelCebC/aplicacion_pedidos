@@ -391,6 +391,32 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       final prefsAgenda = await SharedPreferences.getInstance();
       final comercialId = prefsAgenda.getInt('comercial_id');
       final agendasLista = await apiService.obtenerAgenda(comercialId);
+      if (agendasLista.isNotEmpty && mounted) {
+        final primera = agendasLista[0];
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('DEBUG API'),
+            content: SingleChildScrollView(
+              child: Text(
+                'Primera agenda descargada:\n\n'
+                'ID: ${primera['id']}\n'
+                'asunto: ${primera['asunto']}\n'
+                'fecha_inicio: ${primera['fecha_inicio']}\n'
+                'hora_inicio: "${primera['hora_inicio']}"\n'
+                'hora_fin: "${primera['hora_fin']}"\n'
+                'Length hora_inicio: ${primera['hora_inicio']?.toString().length ?? 0}',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
       await db.limpiarAgenda();
       await db.insertarAgendasLote(agendasLista.cast<Map<String, dynamic>>());
       _addLog('✅ ${agendasLista.length} eventos de agenda guardados');

@@ -313,6 +313,7 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
           ),
         ],
       ),
+
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _comercialId == null
@@ -472,6 +473,47 @@ class _CRMCalendarioScreenState extends State<CRMCalendarioScreen>
               child: const Icon(Icons.add),
             )
           : null,
+    );
+  }
+
+  void _mostrarDebugInfo() {
+    if (_eventosDelDia.isEmpty) return;
+
+    final evento = _eventosDelDia[0];
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('DEBUG - Datos RAW'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('ID: ${evento['id']}'),
+              const Divider(),
+              Text('Asunto: ${evento['asunto']}'),
+              const Divider(),
+              Text('fecha_inicio:\n${evento['fecha_inicio']}'),
+              const Divider(),
+              Text('hora_inicio:\n"${evento['hora_inicio']}"'),
+              Text('Tipo: ${evento['hora_inicio'].runtimeType}'),
+              Text('Length: ${evento['hora_inicio']?.toString().length ?? 0}'),
+              const Divider(),
+              Text('hora_fin:\n"${evento['hora_fin']}"'),
+              const Divider(),
+              Text(
+                '_formatearHora() devuelve:\n${_formatearHora(evento['hora_inicio'])}',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
     );
   }
 }

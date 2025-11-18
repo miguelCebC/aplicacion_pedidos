@@ -5,6 +5,7 @@ import 'services/api_service.dart';
 import 'theme/app_theme.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/auth_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() {
@@ -34,7 +35,8 @@ class _VelneoAppState extends State<VelneoApp> {
       final prefs = await SharedPreferences.getInstance();
       String? url = prefs.getString('velneo_url');
       String? apiKey = prefs.getString('velneo_api_key');
-      final comercialId = prefs.getInt('comercial_id'); // ← LÍNEA DE TU CÓDIGO
+      final comercialId = prefs.getInt('comercial_id');
+
       // Si no hay configuración, no sincronizar
       if (url == null || apiKey == null || url.isEmpty || apiKey.isEmpty) {
         print('⚠️ No hay configuración de API, omitiendo sincronización');
@@ -78,10 +80,9 @@ class _VelneoAppState extends State<VelneoApp> {
         final end = (i + batchSize < articulosLista.length)
             ? i + batchSize
             : articulosLista.length;
-        final batch = articulosLista
-            .sublist(i, end)
-            .cast<Map<String, dynamic>>();
-        await db.insertarArticulosLote(batch);
+        await db.insertarArticulosLote(
+          articulosLista.sublist(i, end).cast<Map<String, dynamic>>(),
+        );
       }
 
       print('💾 Guardando clientes...');
@@ -90,152 +91,58 @@ class _VelneoAppState extends State<VelneoApp> {
         final end = (i + batchSize < clientesLista.length)
             ? i + batchSize
             : clientesLista.length;
-        final batch = clientesLista
-            .sublist(i, end)
-            .cast<Map<String, dynamic>>();
-        await db.insertarClientesLote(batch);
+        await db.insertarClientesLote(
+          clientesLista.sublist(i, end).cast<Map<String, dynamic>>(),
+        );
       }
 
       print('💾 Guardando comerciales...');
       await db.limpiarComerciales();
-      if (comercialesLista.isNotEmpty) {
+      for (var i = 0; i < comercialesLista.length; i += batchSize) {
+        final end = (i + batchSize < comercialesLista.length)
+            ? i + batchSize
+            : comercialesLista.length;
         await db.insertarComercialesLote(
-          comercialesLista.cast<Map<String, dynamic>>(),
+          comercialesLista.sublist(i, end).cast<Map<String, dynamic>>(),
         );
       }
 
-      // === SINCRONIZAR DATOS CRM ===
-      // Solo la primera vez o si las tablas están vacías
-      final provinciasExistentes = await db.obtenerProvincias();
-
-      if (provinciasExistentes.isEmpty) {
-        print('📥 Descargando datos CRM (primera vez)...');
-
-        print('📥 Descargando provincias...');
-        final provinciasLista = await apiService.obtenerProvincias();
-        await db.limpiarProvincias();
-        await db.insertarProvinciasLote(
-          provinciasLista.cast<Map<String, dynamic>>(),
-        );
-
-        print('📥 Descargando zonas técnicas...');
-        final zonasLista = await apiService.obtenerZonasTecnicas();
-        await db.limpiarZonasTecnicas();
-        await db.insertarZonasTecnicasLote(
-          zonasLista.cast<Map<String, dynamic>>(),
-        );
-
-        print('📥 Descargando poblaciones...');
-        final poblacionesLista = await apiService.obtenerPoblaciones();
-        await db.limpiarPoblaciones();
-        await db.insertarPoblacionesLote(
-          poblacionesLista.cast<Map<String, dynamic>>(),
-        );
-
-        print('📥 Descargando campañas...');
-        final campanasLista = await apiService.obtenerCampanas();
-        await db.limpiarCampanas();
-        await db.insertarCampanasLote(
-          campanasLista.cast<Map<String, dynamic>>(),
-        );
-
-        print('📥 Descargando leads...');
-        final leadsLista = await apiService.obtenerLeads();
-        await db.limpiarLeads();
-        await db.insertarLeadsLote(leadsLista.cast<Map<String, dynamic>>());
-
-        print('✅ Datos CRM sincronizados');
-        print('   🗺️ ${provinciasLista.length} provincias');
-        print('   📍 ${zonasLista.length} zonas técnicas');
-        print('   🏘️ ${poblacionesLista.length} poblaciones');
-        print('   📢 ${campanasLista.length} campañas');
-        print('   🎯 ${leadsLista.length} leads');
-      }
-
-      // Sincronizar agenda siempre (puede cambiar frecuentemente)
-      if (comercialId != null) {
-        print('📥 Actualizando agenda del comercial $comercialId...');
-        final agendasLista = await apiService.obtenerAgenda(comercialId);
-        await db.limpiarAgenda();
-        await db.insertarAgendasLote(agendasLista.cast<Map<String, dynamic>>());
-        print('   📅 ${agendasLista.length} eventos de agenda');
-      }
-      // [Dentro de _sincronizarEnSegundoPlano en main.dart]
-
-      // ... (después de sincronizar comerciales)
-      print('💾 Guardando comerciales...');
-      await db.limpiarComerciales();
-      // ...
-
-      // 🟢 AÑADIR ESTA LÓGICA 🟢
-      // Sincronizar Pedidos y Presupuestos
-      print('📥 Descargando pedidos...');
-      final pedidosLista = await apiService.obtenerPedidos();
-      await db.limpiarPedidos(); // <-- Limpia pedidos Y líneas
-      await db.insertarPedidosLote(pedidosLista.cast<Map<String, dynamic>>());
-
-      int totalLineasPedido = 0;
-      for (var pedido in pedidosLista) {
-        final lineas = await apiService.obtenerLineasPedido(pedido['id']);
-        for (var linea in lineas) {
-          await db.insertarLineaPedido(linea);
-          totalLineasPedido++;
-        }
-      }
-      print('   📦 ${pedidosLista.length} pedidos y $totalLineasPedido líneas');
-
-      print('📥 Descargando presupuestos...');
-      final presupuestosLista = await apiService.obtenerPresupuestos();
-      await db.limpiarPresupuestos(); // <-- Limpia presupuestos Y líneas
-      await db.insertarPresupuestosLote(
-        presupuestosLista.cast<Map<String, dynamic>>(),
+      await prefs.setInt(
+        'ultima_sincronizacion',
+        DateTime.now().millisecondsSinceEpoch,
       );
-
-      int totalLineasPresupuesto = 0;
-      for (var presupuesto in presupuestosLista) {
-        final lineas = await apiService.obtenerLineasPresupuesto(
-          presupuesto['id'],
-        );
-        for (var linea in lineas) {
-          await db.insertarLineaPresupuesto(linea);
-          totalLineasPresupuesto++;
-        }
-      }
-      print(
-        '   📋 ${presupuestosLista.length} presupuestos y $totalLineasPresupuesto líneas',
-      );
-      // 🟢 FIN DE LA NUEVA LÓGICA 🟢
-
-      // === SINCRONIZAR DATOS CRM ===
-      // ... (el resto de tu función) ...
-      // Guardar timestamp de sincronización
-      await prefs.setInt('ultima_sincronizacion', ahora);
-      // Guardar timestamp de sincronización
-      await prefs.setInt('ultima_sincronizacion', ahora);
-      print('✅ Sincronización automática completada');
-      print('   📦 ${articulosLista.length} artículos');
-      print('   👥 ${clientesLista.length} clientes');
-      print('   💼 ${comercialesLista.length} comerciales');
+      print('✅ Sincronización en segundo plano completada');
     } catch (e) {
-      print('❌ Error en sincronización automática: $e');
-      // No mostrar error al usuario, es en segundo plano
+      print('❌ Error en sincronización en segundo plano: $e');
     }
+  }
+
+  Future<Widget> _verificarSesion() async {
+    final prefs = await SharedPreferences.getInstance();
+    final comercialId = prefs.getInt('comercial_id');
+
+    if (comercialId == null) {
+      // No hay sesión, ir a login completo
+      return const LoginScreen();
+    }
+
+    // Hay sesión guardada, ir a pantalla de autenticación
+    return const AuthScreen();
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pedidos Velneo',
+      title: 'CRM Velneo',
       theme: AppTheme.theme,
-      locale: const Locale('es', 'ES'),
-      supportedLocales: const [Locale('es', 'ES'), Locale('en', 'US')],
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      home: FutureBuilder<bool>(
-        future: _verificarPrimeraVez(),
+      supportedLocales: const [Locale('es', 'ES')],
+      home: FutureBuilder<Widget>(
+        future: _verificarSesion(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
@@ -243,16 +150,9 @@ class _VelneoAppState extends State<VelneoApp> {
             );
           }
 
-          final esPrimeraVez = snapshot.data ?? true;
-          return esPrimeraVez ? const LoginScreen() : const HomeScreen();
+          return snapshot.data ?? const LoginScreen();
         },
       ),
     );
-  }
-
-  Future<bool> _verificarPrimeraVez() async {
-    final prefs = await SharedPreferences.getInstance();
-    final comercialId = prefs.getInt('comercial_id');
-    return comercialId == null;
   }
 }

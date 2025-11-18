@@ -51,13 +51,12 @@ class DatabaseHelper {
     ''');
 
     await db.execute('''
-      CREATE TABLE usuarios (
-        id INTEGER PRIMARY KEY,
-        nombre TEXT NOT NULL,
-        email TEXT NOT NULL,
-        rol TEXT
-      )
-    ''');
+  CREATE TABLE usuarios (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    ent INTEGER
+  )
+''');
 
     await db.execute('''
       CREATE TABLE comerciales (
@@ -221,6 +220,8 @@ class DatabaseHelper {
     articulo_id INTEGER NOT NULL,
     cantidad REAL NOT NULL,
     precio REAL NOT NULL,
+    por_descuento REAL DEFAULT 0,
+    por_iva REAL DEFAULT 0,
     FOREIGN KEY (presupuesto_id) REFERENCES presupuestos (id),
     FOREIGN KEY (articulo_id) REFERENCES articulos (id)
   )
@@ -246,7 +247,12 @@ class DatabaseHelper {
         FOREIGN KEY (articulo_id) REFERENCES articulos (id)
       )
     ''');
-
+    await db.execute('''
+  CREATE TABLE config_local (
+    clave TEXT PRIMARY KEY,
+    valor TEXT
+  )
+''');
     print('✅ Base de datos creada correctamente');
   }
 
@@ -258,6 +264,31 @@ class DatabaseHelper {
       return result.first['max_id'] as int;
     }
     return 0;
+  }
+
+  Future<void> guardarContrasenaLocal(String contrasena) async {
+    final db = await database;
+    await db.insert('config_local', {
+      'clave': 'contrasena_local',
+      'valor': contrasena,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // Obtener contraseña local
+  Future<String?> obtenerContrasenaLocal() async {
+    final db = await database;
+    final resultado = await db.query(
+      'config_local',
+      where: 'clave = ?',
+      whereArgs: ['contrasena_local'],
+    );
+
+    return resultado.isNotEmpty ? resultado.first['valor'] as String? : null;
+  }
+
+  Future<bool> existeContrasenaLocal() async {
+    final contrasena = await obtenerContrasenaLocal();
+    return contrasena != null && contrasena.isNotEmpty;
   }
 
   Future<List<Map<String, dynamic>>> obtenerAgendasNoSincronizadas([
@@ -377,6 +408,21 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [presupuestoId],
     );
+  }
+
+  Future<void> insertarUsuariosLote(List<Map<String, dynamic>> usuarios) async {
+    final db = await database;
+    final batch = db.batch();
+
+    for (var usuario in usuarios) {
+      batch.insert('usuarios', {
+        'id': usuario['id'],
+        'name': usuario['name'],
+        'ent': usuario['ent'],
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+
+    await batch.commit(noResult: true);
   }
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -902,13 +948,46 @@ class DatabaseHelper {
     await db.delete('leads');
   }
 
+  // Tabla usuarios
+
+  // Obtener comercial por ID
+  Future<Map<String, dynamic>?> obtenerComercialPorId(int id) async {
+    final db = await database;
+    final List<Map<String, dynamic>> resultado = await db.query(
+      'comerciales',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+
+    return resultado.isNotEmpty ? resultado.first : null;
+  }
+
+  Future<Map<String, dynamic>?> obtenerUsuarioPorComercial(
+    int comercialId,
+  ) async {
+    final db = await database;
+    final List<Map<String, dynamic>> resultado = await db.query(
+      'usuarios',
+      where: 'ent = ?',
+      whereArgs: [comercialId],
+      limit: 1,
+    );
+
+    return resultado.isNotEmpty ? resultado.first : null;
+  }
   // ========== AGENDA ==========
 
   Future<void> insertarAgendasLote(List<Map<String, dynamic>> agendas) async {
     final db = await database;
     final batch = db.batch();
 
+    DebugLogger.log('💾 Insertando ${agendas.length} agendas en BD local...');
+
     for (var agenda in agendas) {
+      DebugLogger.log(
+        '💾 BD: Agenda #${agenda['id']} - hora_inicio: "${agenda['hora_inicio']}"',
+      );
       batch.insert(
         'agenda',
         agenda,
@@ -917,6 +996,7 @@ class DatabaseHelper {
     }
 
     await batch.commit(noResult: true);
+    DebugLogger.log('✅ ${agendas.length} agendas insertadas en BD');
   }
 
   Future<List<Map<String, dynamic>>> obtenerAgenda([int? comercialId]) async {

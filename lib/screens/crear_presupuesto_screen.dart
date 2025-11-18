@@ -51,7 +51,6 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
     );
 
     if (articulo != null) {
-      // 🟢 NUEVA LÓGICA: Obtener precio y descuento según jerarquía
       final db = DatabaseHelper.instance;
       final precioInfo = await db.obtenerPrecioYDescuento(
         _clienteSeleccionado!['id'],
@@ -68,7 +67,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
           cantidad: 1,
           precio: precioInfo['precio']!,
           descuento: precioInfo['descuento']!,
-          iva: 21.0,
+          tipoIva: 'G',
         ),
       );
 
@@ -95,7 +94,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
         cantidad: lineaActual.cantidad,
         precio: lineaActual.precio,
         descuento: lineaActual.descuento,
-        iva: lineaActual.iva,
+        tipoIva: lineaActual.tipoIva,
       ),
     );
 
@@ -106,11 +105,26 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
     }
   }
 
+  double _calcularBaseImponible() {
+    return _lineas.fold(0, (total, linea) {
+      final subtotal = linea.cantidad * linea.precio;
+      final descuento = subtotal * (linea.descuento / 100);
+      return total + (subtotal - descuento);
+    });
+  }
+
+  double _calcularTotalIva() {
+    return _lineas.fold(0, (totalIva, linea) {
+      final subtotal = linea.cantidad * linea.precio;
+      final descuento = subtotal * (linea.descuento / 100);
+      final baseLinea = subtotal - descuento;
+      final ivaLinea = baseLinea * (linea.porcentajeIva / 100);
+      return totalIva + ivaLinea;
+    });
+  }
+
   double _calcularTotal() {
-    return _lineas.fold(
-      0,
-      (total, linea) => total + (linea.cantidad * linea.precio),
-    );
+    return _calcularBaseImponible() + _calcularTotalIva();
   }
 
   Future<void> _guardarPresupuesto() async {
@@ -155,31 +169,26 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
         'cliente_id': _clienteSeleccionado!['id'],
         'comercial_id': comercialId,
         'fecha': DateTime.now().toIso8601String(),
+        'numero': '',
+        'estado': 'P',
         'observaciones': _observacionesController.text,
         'total': _calcularTotal(),
         'lineas': _lineas
             .map(
               (linea) => {
-                'articulo_id': linea.articulo['id'],
-                'cantidad': linea.cantidad,
-                'precio': linea.precio,
+                'art': linea.articulo['id'],
+                'can': linea.cantidad,
+                'pre_ven': linea.precio,
+                'por_dto': linea.descuento,
+                'reg_iva_vta': linea.tipoIva, // G/R/S/X para presupuestos
               },
             )
             .toList(),
       };
 
-      final resultado = await apiService
-          .crearPresupuesto(presupuestoData)
-          .timeout(
-            const Duration(seconds: 45),
-            onTimeout: () => throw Exception(
-              'Timeout: El servidor tardó demasiado en responder',
-            ),
-          );
-
+      final resultado = await apiService.crearPresupuesto(presupuestoData);
       final presupuestoId = resultado['id'];
 
-      // Guardar en BD local
       final db = DatabaseHelper.instance;
       await db.insertarPresupuesto({
         'id': presupuestoId,
@@ -199,6 +208,8 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
           'articulo_id': linea.articulo['id'],
           'cantidad': linea.cantidad,
           'precio': linea.precio,
+          'por_descuento': linea.descuento,
+          'por_iva': linea.porcentajeIva,
         });
       }
 
@@ -305,6 +316,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                       label: const Text('Agregar'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF032458),
+                        foregroundColor: Colors.white,
                       ),
                     ),
                   ],
@@ -352,6 +364,11 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                   ..._lineas.asMap().entries.map((entry) {
                     final index = entry.key;
                     final linea = entry.value;
+                    final subtotal = linea.cantidad * linea.precio;
+                    final descuento = subtotal * (linea.descuento / 100);
+                    final baseLinea = subtotal - descuento;
+                    final ivaLinea = baseLinea * (linea.porcentajeIva / 100);
+                    final totalLinea = baseLinea + ivaLinea;
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
@@ -372,25 +389,10 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                           linea.articulo['nombre'],
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Código: ${linea.articulo['codigo']}'),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Text(
-                                  'Cantidad: ${linea.cantidad}',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                const SizedBox(width: 16),
-                                Text(
-                                  'Precio: ${linea.precio.toStringAsFixed(2)}€',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ],
+                        subtitle: Text(
+                          '${linea.articulo['codigo']} - ${linea.cantidad} x ${linea.precio.toStringAsFixed(2)}€'
+                          '${linea.descuento > 0 ? ' (-${linea.descuento}%)' : ''}'
+                          '\nIVA: ${linea.tipoIva} (${linea.porcentajeIva}%)',
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -400,13 +402,22 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Text(
-                                  '${(linea.cantidad * linea.precio).toStringAsFixed(2)}€',
+                                  '${totalLinea.toStringAsFixed(2)}€',
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
                                     color: Color(0xFF032458),
                                   ),
                                 ),
+                                if (linea.descuento > 0 ||
+                                    linea.porcentajeIva > 0)
+                                  Text(
+                                    'Base: ${baseLinea.toStringAsFixed(2)}€',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
                               ],
                             ),
                             const SizedBox(width: 8),
@@ -414,7 +425,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                               icon: const Icon(Icons.more_vert),
                               itemBuilder: (context) => [
                                 const PopupMenuItem(
-                                  value: 'edit',
+                                  value: 'editar',
                                   child: Row(
                                     children: [
                                       Icon(Icons.edit, size: 20),
@@ -424,7 +435,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                                   ),
                                 ),
                                 const PopupMenuItem(
-                                  value: 'delete',
+                                  value: 'eliminar',
                                   child: Row(
                                     children: [
                                       Icon(
@@ -442,86 +453,106 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                                 ),
                               ],
                               onSelected: (value) {
-                                if (value == 'edit') {
+                                if (value == 'editar') {
                                   _editarLinea(index);
-                                } else if (value == 'delete') {
+                                } else if (value == 'eliminar') {
                                   _eliminarLinea(index);
                                 }
                               },
                             ),
                           ],
                         ),
+                        isThreeLine: true,
                       ),
                     );
                   }),
 
-                // Total
-                if (_lineas.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF032458).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: const Color(0xFF032458),
-                        width: 2,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                const SizedBox(height: 16),
+
+                // Card de totales con desglose
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 16),
+                  color: const Color(0xFF032458).withOpacity(0.05),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
                       children: [
-                        const Text(
-                          'TOTAL',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF032458),
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Base Imponible:'),
+                            Text(
+                              '${_calcularBaseImponible().toStringAsFixed(2)}€',
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                          ],
                         ),
-                        Text(
-                          '${_calcularTotal().toStringAsFixed(2)} €',
-                          style: const TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF032458),
-                          ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('IVA:'),
+                            Text(
+                              '${_calcularTotalIva().toStringAsFixed(2)}€',
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'TOTAL:',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '${_calcularTotal().toStringAsFixed(2)}€',
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF032458),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
-                ],
-
-                const SizedBox(height: 24),
+                ),
 
                 // Botón guardar
-                ElevatedButton.icon(
+                ElevatedButton(
                   onPressed: _guardando ? null : _guardarPresupuesto,
-                  icon: _guardando
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF032458),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: _guardando
                       ? const SizedBox(
-                          width: 20,
                           height: 20,
+                          width: 20,
                           child: CircularProgressIndicator(
-                            color: Colors.white,
                             strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
                           ),
                         )
-                      : const Icon(Icons.save),
-                  label: const Text('Crear Presupuesto'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.all(16),
-                    backgroundColor: const Color(0xFF032458),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  '* Campos obligatorios',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                    fontStyle: FontStyle.italic,
-                  ),
-                  textAlign: TextAlign.center,
+                      : const Text(
+                          'GUARDAR PRESUPUESTO',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ],
             ),

@@ -782,7 +782,18 @@ class VelneoAPIService {
 
             if (data['crm_age'] != null && data['crm_age'] is List) {
               final agendasList = data['crm_age'] as List;
-
+              if (page == 1 && agendasList.isNotEmpty) {
+                print('========================================');
+                print('🔍 DEBUG API - Primer registro RAW:');
+                final primer = agendasList[0];
+                print('ID: ${primer['id']}');
+                print('asu: ${primer['asu']}');
+                print('fch_ini: ${primer['fch_ini']}');
+                print('hor_ini RAW: "${primer['hor_ini']}"');
+                print('hor_ini TIPO: ${primer['hor_ini'].runtimeType}');
+                print('hor_fin RAW: "${primer['hor_fin']}"');
+                print('========================================');
+              }
               if (agendasList.isEmpty) {
                 DebugLogger.log('  🏁 No hay más registros en página $page');
                 break;
@@ -818,10 +829,43 @@ class VelneoAPIService {
 
                     String? limpiarHora(dynamic hora) {
                       if (hora == null) return null;
+
                       String horaStr = hora.toString().trim();
                       if (horaStr.isEmpty) return null;
-                      return horaStr.split('.').first;
+
+                      print('🕐 limpiarHora RAW: "$horaStr"');
+
+                      // Si viene en formato GMT: "Mon Nov 17 09:00:00 2025 GMT"
+                      if (horaStr.contains('GMT')) {
+                        try {
+                          // Extraer la hora usando regex
+                          final regex = RegExp(r'\d{2}:\d{2}:\d{2}');
+                          final match = regex.firstMatch(horaStr);
+
+                          if (match != null) {
+                            final horaExtraida = match.group(0)!;
+                            print('✅ Hora extraída de GMT: "$horaExtraida"');
+                            return horaExtraida;
+                          }
+                        } catch (e) {
+                          print('❌ Error parseando hora GMT: $horaStr - $e');
+                        }
+                      }
+
+                      // Si ya viene en formato "HH:MM:SS" directo
+                      if (horaStr.contains(':')) {
+                        final resultado = horaStr.split('.').first;
+                        print('✅ Hora formato directo: "$resultado"');
+                        return resultado;
+                      }
+
+                      print('⚠️ No se pudo extraer hora de: "$horaStr"');
+                      return null;
                     }
+
+                    DebugLogger.log(
+                      '🕐 Hora RAW: ${agenda['hor_ini']} → Limpia: ${limpiarHora(agenda['hor_ini'])}',
+                    );
 
                     return {
                       'id': agenda['id'],
@@ -2023,54 +2067,302 @@ class VelneoAPIService {
     }
   }
 
-  Future<Map<String, dynamic>> obtenerComercialPorId(int comercialId) async {
-    final endpoint = '/ENT_M/$comercialId';
-    final url = _buildUrl(endpoint); // _buildUrl ya añade la api_key
+  // Obtener todos los usuarios
+  Future<List> obtenerTodosUsuarios() async {
+    final allUsuarios = <Map<String, dynamic>>[];
+    int page = 1;
+    const pageSize = 1000;
 
-    _log('🔍 Verificando comercial ID $comercialId en $url');
+    try {
+      while (true) {
+        final url = _buildUrlWithParams('/usr_m', {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+        });
 
-    final response = await _getWithSSL(
-      url,
-    ).timeout(const Duration(seconds: 30));
+        final response = await _getWithSSL(
+          url,
+        ).timeout(const Duration(seconds: 45));
 
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
 
-      // La API de Velneo para un ID suele devolver una lista con un solo elemento
-      if (data['ent_m'] != null &&
-          data['ent_m'] is List &&
-          (data['ent_m'] as List).isNotEmpty) {
-        final entidad = (data['ent_m'] as List).first;
+          if (data['usr_m'] != null && data['usr_m'] is List) {
+            final lista = data['usr_m'] as List;
 
-        // Comprobamos que el ID encontrado sea realmente un comercial
-        if (entidad['es_cmr'] == true) {
-          _log('✅ Comercial ID $comercialId encontrado: ${entidad['nom_fis']}');
-          return {
-            'id': entidad['id'],
-            'nombre': entidad['nom_fis'] ?? 'Sin nombre',
-            'email': entidad['eml'] ?? '',
-            'telefono': entidad['tlf'] ?? '',
-            'direccion': entidad['dir'] ?? '',
-          };
+            if (lista.isEmpty) break;
+
+            allUsuarios.addAll(lista.cast<Map<String, dynamic>>());
+
+            if (lista.length < pageSize) break;
+            page++;
+          } else {
+            break;
+          }
         } else {
-          _log(
-            '❌ ID $comercialId encontrado, pero no está marcado como comercial (es_cmr=false)',
-          );
-          throw Exception('El ID $comercialId no pertenece a un comercial');
+          throw Exception('Error HTTP ${response.statusCode}');
+        }
+      }
+
+      _log('✅ Total usuarios obtenidos: ${allUsuarios.length}');
+      return allUsuarios;
+    } catch (e) {
+      _log('❌ Error obteniendo usuarios: $e');
+      throw Exception('Error al obtener usuarios: $e');
+    }
+  }
+
+  // Obtener todos los registros de usr_apl
+  Future<List> obtenerTodosUsrApl() async {
+    final allUsrApl = <Map<String, dynamic>>[];
+    int page = 1;
+    const pageSize = 1000;
+
+    try {
+      while (true) {
+        final url = _buildUrlWithParams('/usr_apl', {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+        });
+
+        final response = await _getWithSSL(
+          url,
+        ).timeout(const Duration(seconds: 45));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+
+          if (data['usr_apl'] != null && data['usr_apl'] is List) {
+            final lista = data['usr_apl'] as List;
+
+            if (lista.isEmpty) break;
+
+            allUsrApl.addAll(lista.cast<Map<String, dynamic>>());
+
+            if (lista.length < pageSize) break;
+            page++;
+          } else {
+            break;
+          }
+        } else {
+          throw Exception('Error HTTP ${response.statusCode}');
+        }
+      }
+
+      _log('✅ Total usr_apl obtenidos: ${allUsrApl.length}');
+      return allUsrApl;
+    } catch (e) {
+      _log('❌ Error obteniendo usr_apl: $e');
+      throw Exception('Error al obtener usr_apl: $e');
+    }
+  }
+
+  // Buscar comercial por ID en ENT_M
+  Future<Map<String, dynamic>?> obtenerComercialPorId(int id) async {
+    try {
+      final url = _buildUrl('/ent_m/$id');
+      _log('🔍 Buscando comercial ID $id');
+      _log('📡 URL completa: $url');
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
+
+      _log('📥 Status: ${response.statusCode}');
+      _log('📥 Response COMPLETO: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        _log('📊 Tipo de data: ${data.runtimeType}');
+        _log(
+          '📊 Keys disponibles: ${data is Map ? data.keys.toList() : "No es Map"}',
+        );
+
+        // Intentar diferentes estructuras de respuesta
+        if (data is Map<String, dynamic>) {
+          if (data.containsKey('ent_m')) {
+            _log('✓ Tiene clave ent_m');
+            final entM = data['ent_m'];
+            _log('✓ Tipo de ent_m: ${entM.runtimeType}');
+
+            if (entM is List && entM.isNotEmpty) {
+              _log('✅ Comercial encontrado (formato lista)');
+              final comercial = entM.first as Map<String, dynamic>;
+              _log('   Nombre: ${comercial['nom']}');
+              _log('   ID: ${comercial['id']}');
+              return comercial;
+            } else if (entM is Map<String, dynamic>) {
+              _log('✅ Comercial encontrado (formato map directo)');
+              _log('   Nombre: ${entM['nom']}');
+              _log('   ID: ${entM['id']}');
+              return entM;
+            }
+          } else {
+            // Podría ser el objeto directo sin envolver
+            _log('✅ Comercial encontrado (sin clave ent_m)');
+            _log('   Nombre: ${data['nom']}');
+            _log('   ID: ${data['id']}');
+            return data;
+          }
+        } else if (data is List && data.isNotEmpty) {
+          _log('✅ Comercial encontrado (lista directa)');
+          final comercial = data.first as Map<String, dynamic>;
+          _log('   Nombre: ${comercial['nom']}');
+          _log('   ID: ${comercial['id']}');
+          return comercial;
+        }
+
+        _log('⚠️ Formato de respuesta no reconocido');
+        return null;
+      } else if (response.statusCode == 404) {
+        _log('❌ Comercial no encontrado (404)');
+        return null;
+      } else {
+        _log('❌ Error HTTP ${response.statusCode}');
+        _log('❌ Body: ${response.body}');
+        throw Exception('Error HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      _log('❌ Excepción al buscar comercial: $e');
+      throw Exception('Error al buscar comercial por ID: $e');
+    }
+  }
+
+  // Buscar usuario de app por ID de comercial (ENT) en USR_M
+  Future<Map<String, dynamic>?> obtenerUsuarioPorComercial(
+    int comercialId,
+  ) async {
+    try {
+      final url = _buildUrl('/usr_m?filter[ent]=$comercialId');
+      _log('🔍 Buscando usuario de app para comercial $comercialId');
+      _log('📡 URL: $url');
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
+
+      _log('📥 Status: ${response.statusCode}');
+      _log('📥 Response completo: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        _log('📊 Total registros: ${data['total_count']}');
+
+        final lista = data['usr_m'] as List?;
+
+        if (lista != null && lista.isNotEmpty) {
+          _log('✅ Usuarios encontrados: ${lista.length}');
+          for (var usr in lista) {
+            _log(
+              '   - Usuario ID: ${usr['id']}, Nombre: ${usr['name']}, ENT: ${usr['ent']}',
+            );
+          }
+          return lista.first as Map<String, dynamic>;
+        } else {
+          _log('⚠️ No se encontró usuario de app para comercial $comercialId');
+          return null;
         }
       } else {
-        // No se encontró la entidad
-        _log('❌ No se encontró ningún registro con ID $comercialId en /ENT_M');
-        throw Exception('No se encontró ningún comercial con ID $comercialId');
+        _log('❌ Error HTTP ${response.statusCode}: ${response.body}');
+        throw Exception('Error HTTP ${response.statusCode}');
       }
-    } else if (response.statusCode == 404) {
-      _log('❌ No se encontró ningún registro con ID $comercialId (404)');
-      throw Exception('No se encontró ningún comercial con ID $comercialId');
-    } else {
-      _log('❌ Error HTTP ${response.statusCode} al verificar comercial');
-      throw Exception(
-        'Error HTTP ${response.statusCode} al verificar comercial',
+    } catch (e) {
+      _log('❌ Error al buscar usuario: $e');
+      throw Exception('Error al buscar usuario por comercial: $e');
+    }
+  }
+
+  // Verificar si usuario tiene acceso a la aplicación en USR_APL
+  Future<bool> verificarAccesoApp(int usuarioId, int codigoApp) async {
+    try {
+      final url = _buildUrl(
+        '/usr_apl?filter[usr_m]=$usuarioId&filter[apl_tec]=$codigoApp',
       );
+      _log('🔐 Verificando acceso en USR_APL');
+      _log('   Usuario ID (usr_m): $usuarioId');
+      _log('   Código App (apl_tec): $codigoApp');
+      _log('📡 URL: $url');
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
+
+      _log('📥 Status: ${response.statusCode}');
+      _log('📥 Response completo: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        _log('📊 Total registros USR_APL: ${data['total_count']}');
+
+        final lista = data['usr_apl'] as List?;
+
+        if (lista != null && lista.isNotEmpty) {
+          _log('✅ Registros de acceso encontrados: ${lista.length}');
+          for (var acc in lista) {
+            _log(
+              '   - ID: ${acc['id']}, usr_m: ${acc['usr_m']}, apl_tec: ${acc['apl_tec']}',
+            );
+          }
+          return true;
+        } else {
+          _log(
+            '❌ No se encontró acceso para usuario $usuarioId en app $codigoApp',
+          );
+          _log(
+            '💡 Verifica que exista un registro en usr_apl con usr_m=$usuarioId y apl_tec=$codigoApp',
+          );
+          return false;
+        }
+      } else {
+        _log('❌ Error HTTP ${response.statusCode}: ${response.body}');
+        return false;
+      }
+    } catch (e) {
+      _log('❌ Error al verificar acceso: $e');
+      return false;
+    }
+  }
+
+  // Buscar usuario de app por ID de comercial Y código de app
+  Future<Map<String, dynamic>?> obtenerUsuarioPorComercialYCodigo(
+    int comercialId,
+    String codigoApp,
+  ) async {
+    try {
+      final url = _buildUrl(
+        '/usr_m?filter[ent]=$comercialId&filter[asp]=$codigoApp',
+      );
+      _log(
+        '🔍 Buscando usuario para comercial $comercialId con código app $codigoApp',
+      );
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
+
+      _log('📥 Status: ${response.statusCode}');
+      _log('📥 Response: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final lista = data['usr_m'] as List?;
+
+        if (lista != null && lista.isNotEmpty) {
+          _log('✅ Usuario de app encontrado: ${lista.first['name']}');
+          return lista.first as Map<String, dynamic>;
+        } else {
+          _log('⚠️ No se encontró usuario con ese comercial y código de app');
+          return null;
+        }
+      } else {
+        _log('❌ Error HTTP ${response.statusCode}');
+        throw Exception('Error HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      _log('❌ Error al buscar usuario: $e');
+      throw Exception('Error al buscar usuario: $e');
     }
   }
 

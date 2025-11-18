@@ -13,6 +13,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _comercialIdController = TextEditingController();
+  final _codigoAppController = TextEditingController();
   final _serverUrlController = TextEditingController(
     text: 'tecerp.nunsys.com:4311/TORRAL/TecERPv7_dat_dat',
   );
@@ -46,6 +47,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _iniciarSesion() async {
     final comercialId = int.tryParse(_comercialIdController.text.trim());
+    final codigoApp = _codigoAppController.text.trim();
 
     if (comercialId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -54,6 +56,12 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    if (codigoApp.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ El código de app es obligatorio')),
+      );
+      return;
+    }
     if (_serverUrlController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('❌ La URL del servidor es obligatoria')),
@@ -100,41 +108,97 @@ class _LoginScreenState extends State<LoginScreen> {
         finalUrl = 'https://$finalUrl';
       }
 
+      // LÍNEAS A CAMBIAR:
+
       _addLog('🌐 Conectando a: $finalUrl');
       final apiKey = _apiKeyController.text.trim();
       final apiService = VelneoAPIService(finalUrl, apiKey);
 
-      // Verificar comercial en ENT_M
-      setState(() => _statusMessage = 'Buscando comercial ID $comercialId...');
-      _addLog('🔍 Buscando comercial ID $comercialId en ENT_M');
+      // 1. Descargar comerciales primero
+      setState(() => _statusMessage = 'Descargando comerciales...');
+      _addLog('📥 Descargando lista de comerciales desde API');
 
-      // Obtener todos los comerciales
       final resultado = await apiService.obtenerClientes();
       final comercialesLista = resultado['comerciales'] as List;
 
-      _addLog('📊 Total comerciales encontrados: ${comercialesLista.length}');
+      _addLog('📊 Total comerciales descargados: ${comercialesLista.length}');
 
-      // Buscar el comercial específico
-      final comercial = comercialesLista.firstWhere(
-        (c) => c['id'] == comercialId,
-        orElse: () => {},
+      final db = DatabaseHelper.instance;
+      await db.limpiarComerciales();
+      await db.insertarComercialesLote(
+        comercialesLista.cast<Map<String, dynamic>>(),
       );
+      _addLog('💾 Comerciales guardados en base de datos local');
 
-      if (comercial.isEmpty) {
+      // 2. Buscar el comercial en la BD local
+      setState(() => _statusMessage = 'Validando comercial ID $comercialId...');
+      _addLog('🔍 Buscando comercial ID $comercialId en base de datos local');
+
+      final comercial = await db.obtenerComercialPorId(comercialId);
+
+      if (comercial == null || comercial.isEmpty) {
+        _addLog('❌ No se encontró comercial con ID $comercialId');
         throw Exception('No se encontró ningún comercial con ID $comercialId');
       }
 
       _addLog('✅ Comercial encontrado: ${comercial['nombre']}');
 
-      // Validar que es comercial activo (no necesitamos verificar es_cmr aquí porque
-      // ya viene de la lista de comerciales filtrada)
-      _addLog('🔐 Validando comercial activo...');
+      // 3. Descargar usuarios de app
+      setState(() => _statusMessage = 'Descargando usuarios de app...');
+      _addLog('📥 Descargando usuarios desde API');
 
-      setState(
-        () => _statusMessage = 'Comercial validado. Sincronizando datos...',
+      final usuariosLista = await apiService.obtenerTodosUsuarios();
+      _addLog('📊 Total usuarios descargados: ${usuariosLista.length}');
+
+      // Guardar usuarios en BD local (necesitarás crear esta tabla)
+      await db.insertarUsuariosLote(usuariosLista.cast<Map<String, dynamic>>());
+      _addLog('💾 Usuarios guardados en base de datos local');
+
+      // 4. Buscar usuario asociado al comercial en BD local
+      setState(() => _statusMessage = 'Buscando usuario de app...');
+      _addLog('🔍 Buscando usuario para comercial ID $comercialId en BD local');
+
+      final usuario = await db.obtenerUsuarioPorComercial(comercialId);
+
+      if (usuario == null || usuario.isEmpty) {
+        _addLog('❌ No se encontró usuario para este comercial');
+        throw Exception('No se encontró usuario de app para este comercial.');
+      }
+
+      final usuarioAppId = usuario['id'] as int;
+      _addLog(
+        '✅ Usuario de app encontrado: ${usuario['name']} (ID: $usuarioAppId)',
       );
-      _addLog('🚀 Iniciando sincronización completa...');
 
+      // 5. Descargar relaciones usr_apl
+      setState(() => _statusMessage = 'Validando acceso a la aplicación...');
+      _addLog('📥 Descargando permisos de aplicación');
+
+      final usrAplLista = await apiService.obtenerTodosUsrApl();
+      _addLog('📊 Total registros usr_apl descargados: ${usrAplLista.length}');
+
+      // 6. Verificar acceso en la lista descargada
+      _addLog(
+        '🔐 Verificando acceso del usuario $usuarioAppId al código de app $codigoApp',
+      );
+
+      final tieneAcceso = usrAplLista.any(
+        (reg) =>
+            reg['usr_m'] == usuarioAppId &&
+            reg['apl_tec'] == int.parse(codigoApp),
+      );
+
+      if (!tieneAcceso) {
+        _addLog('❌ Usuario no tiene acceso a esta aplicación');
+        _addLog(
+          '💡 No existe registro usr_apl con usr_m=$usuarioAppId y apl_tec=$codigoApp',
+        );
+        throw Exception('Este usuario no tiene acceso a la aplicación.');
+      }
+
+      _addLog('✅ Acceso validado correctamente');
+      _addLog('✅ Acceso validado correctamente');
+      // Línea 150-156 - Guardar también el ID del usuario de app:
       // Guardar configuración
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('velneo_url', finalUrl);
@@ -142,7 +206,8 @@ class _LoginScreenState extends State<LoginScreen> {
       await prefs.setString('api_version', apiVersion);
       await prefs.setInt('comercial_id', comercialId);
       await prefs.setString('comercial_nombre', comercial['nombre']);
-
+      await prefs.setInt('usuario_app_id', usuarioAppId);
+      await prefs.setString('usuario_app_nombre', usuario['name']);
       _addLog('💾 Configuración guardada');
 
       // Sincronizar todos los datos
@@ -164,12 +229,46 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
+      // Mostrar diálogo con TODOS los logs
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Error de Conexión'),
-          content: SingleChildScrollView(
-            child: Text(e.toString().replaceAll('Exception: ', '')),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 400,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Error: ${e.toString().replaceAll('Exception: ', '')}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red,
+                    ),
+                  ),
+                  const Divider(height: 24),
+                  const Text(
+                    'Log completo:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  ..._logMessages.map(
+                    (log) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        log,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           actions: [
             TextButton(
@@ -417,7 +516,16 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(fontSize: 16, color: Colors.grey),
                     ),
                     const SizedBox(height: 48),
-
+                    TextField(
+                      controller: _codigoAppController,
+                      decoration: const InputDecoration(
+                        labelText: 'Código de App *',
+                        hintText: 'Código único de aplicación',
+                        prefixIcon: Icon(Icons.smartphone),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     // ID Comercial
                     TextField(
                       controller: _comercialIdController,

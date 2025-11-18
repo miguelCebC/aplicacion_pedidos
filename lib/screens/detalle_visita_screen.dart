@@ -412,7 +412,7 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
                                 'Hora Fin',
                                 _formatearHora(widget.visita['hora_fin']),
                               ),
-                            if (widget.visita['fecha_proxima_visita'] != null &&
+                            /* if (widget.visita['fecha_proxima_visita'] != null &&
                                 widget.visita['fecha_proxima_visita']
                                     .toString()
                                     .isNotEmpty)
@@ -438,7 +438,7 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
                                 _formatearFecha(
                                   widget.visita['fecha_proxima_visita'],
                                 ),
-                              ),
+                              ),*/
                           ],
                         ),
                       ),
