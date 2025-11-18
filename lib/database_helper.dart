@@ -1095,11 +1095,16 @@ class DatabaseHelper {
     if (busqueda != null && busqueda.isNotEmpty) {
       return await db.query(
         'articulos',
-        where: 'nombre LIKE ? OR codigo LIKE ? OR id LIKE ?',
+        where:
+            '(nombre LIKE ? OR codigo LIKE ? OR id LIKE ?) AND nombre IS NOT NULL AND nombre != ""',
         whereArgs: ['%$busqueda%', '%$busqueda%', '%$busqueda%'],
       );
     }
-    return await db.query('articulos', orderBy: 'nombre');
+    return await db.query(
+      'articulos',
+      where: 'nombre IS NOT NULL AND nombre != ""',
+      orderBy: 'nombre',
+    );
   }
 
   Future<int> insertarUsuario(Map<String, dynamic> usuario) async {

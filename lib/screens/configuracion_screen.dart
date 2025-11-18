@@ -552,7 +552,274 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       );
     }
   }
+  // Añadir después del método _sincronizarDatos() en lib/screens/configuracion_screen.dart
 
+  Future<void> _sincronizacionIncremental() async {
+    if (_urlController.text.isEmpty || _apiKeyController.text.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Configura la URL y API Key primero')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSyncing = true;
+      _syncStatus = 'Actualización rápida...';
+      _syncProgress = 0.0;
+      _syncDetalle = '';
+      _logMessages.clear();
+    });
+
+    _addLog('🔄 Iniciando actualización incremental');
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ultimaSincMs = prefs.getInt('ultima_sincronizacion') ?? 0;
+
+      DateTime? fechaDesde;
+      if (ultimaSincMs > 0) {
+        // Restar 1 hora de margen para no perder datos
+        fechaDesde = DateTime.fromMillisecondsSinceEpoch(
+          ultimaSincMs,
+        ).subtract(const Duration(hours: 1));
+        _addLog('📅 Buscando cambios desde: ${fechaDesde.toIso8601String()}');
+      } else {
+        _addLog('📅 Primera sincronización - usar sincronización completa');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Primera vez: usa Sincronización Completa'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        setState(() => _isSyncing = false);
+        return;
+      }
+
+      String url = _urlController.text.trim();
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://$url';
+      }
+
+      final apiService = VelneoAPIService(
+        url,
+        _apiKeyController.text,
+        onLog: _addLog,
+      );
+      final db = DatabaseHelper.instance;
+      final comercialId = prefs.getInt('comercial_id');
+
+      setState(() {
+        _syncStatus = 'Verificando conexión...';
+        _syncProgress = 0.1;
+      });
+
+      final conexionOk = await apiService.probarConexion();
+      if (!conexionOk) {
+        throw Exception('No se puede conectar a la API');
+      }
+
+      setState(() {
+        _syncStatus = 'Actualizando artículos...';
+        _syncProgress = 0.15;
+      });
+
+      _addLog('📥 Buscando artículos modificados...');
+      final articulosNuevos = await apiService.obtenerArticulosIncrementales(
+        fechaDesde,
+      );
+
+      if (articulosNuevos.isNotEmpty) {
+        await db.insertarArticulosLote(
+          articulosNuevos.cast<Map<String, dynamic>>(),
+        );
+        _addLog('✅ ${articulosNuevos.length} artículos actualizados');
+      } else {
+        _addLog('✓ No hay artículos nuevos');
+      }
+
+      // Actualizar clientes y comerciales
+      setState(() {
+        _syncStatus = 'Actualizando clientes...';
+        _syncProgress = 0.2;
+      });
+
+      _addLog('📥 Buscando clientes/comerciales modificados...');
+      final resultadoClientes = await apiService.obtenerClientesIncrementales(
+        fechaDesde,
+      );
+      final clientesNuevos = resultadoClientes['clientes'] as List;
+      final comercialesNuevos = resultadoClientes['comerciales'] as List;
+
+      if (clientesNuevos.isNotEmpty) {
+        await db.insertarClientesLote(
+          clientesNuevos.cast<Map<String, dynamic>>(),
+        );
+        _addLog('✅ ${clientesNuevos.length} clientes actualizados');
+      } else {
+        _addLog('✓ No hay clientes nuevos');
+      }
+
+      if (comercialesNuevos.isNotEmpty) {
+        await db.insertarComercialesLote(
+          comercialesNuevos.cast<Map<String, dynamic>>(),
+        );
+        _addLog('✅ ${comercialesNuevos.length} comerciales actualizados');
+      } else {
+        _addLog('✓ No hay comerciales nuevos');
+      }
+
+      // Actualizar pedidos (cambiar el progress a 0.35)
+      setState(() {
+        _syncStatus = 'Actualizando pedidos...';
+        _syncProgress = 0.35;
+      });
+
+      _addLog('📥 Buscando pedidos modificados...');
+      final pedidosNuevos = await apiService.obtenerPedidosIncrementales(
+        fechaDesde,
+      );
+
+      if (pedidosNuevos.isNotEmpty) {
+        await db.insertarPedidosLote(
+          pedidosNuevos.cast<Map<String, dynamic>>(),
+        );
+        _addLog('✅ ${pedidosNuevos.length} pedidos actualizados');
+
+        _addLog('📥 Actualizando líneas de pedido...');
+        final lineasPedido = await apiService.obtenerTodasLineasPedido();
+        await db.insertarLineasPedidoLote(
+          lineasPedido.cast<Map<String, dynamic>>(),
+        );
+      } else {
+        _addLog('✓ No hay pedidos nuevos');
+      }
+
+      // Actualizar presupuestos
+      setState(() {
+        _syncStatus = 'Actualizando presupuestos...';
+        _syncProgress = 0.4;
+      });
+
+      _addLog('📥 Buscando presupuestos modificados...');
+      final presupuestosNuevos = await apiService
+          .obtenerPresupuestosIncrementales(fechaDesde);
+
+      if (presupuestosNuevos.isNotEmpty) {
+        await db.insertarPresupuestosLote(
+          presupuestosNuevos.cast<Map<String, dynamic>>(),
+        );
+        _addLog('✅ ${presupuestosNuevos.length} presupuestos actualizados');
+
+        _addLog('📥 Actualizando líneas de presupuesto...');
+        final lineasPresupuesto = await apiService
+            .obtenerTodasLineasPresupuesto();
+        await db.insertarLineasPresupuestoLote(
+          lineasPresupuesto.cast<Map<String, dynamic>>(),
+        );
+      } else {
+        _addLog('✓ No hay presupuestos nuevos');
+      }
+
+      // Actualizar leads
+      setState(() {
+        _syncStatus = 'Actualizando leads...';
+        _syncProgress = 0.6;
+      });
+
+      _addLog('📥 Buscando leads modificados...');
+      final leadsNuevos = await apiService.obtenerLeadsIncrementales(
+        fechaDesde,
+      );
+
+      if (leadsNuevos.isNotEmpty) {
+        await db.insertarLeadsLote(leadsNuevos.cast<Map<String, dynamic>>());
+        _addLog('✅ ${leadsNuevos.length} leads actualizados');
+      } else {
+        _addLog('✓ No hay leads nuevos');
+      }
+
+      // Actualizar agenda
+      setState(() {
+        _syncStatus = 'Actualizando agenda...';
+        _syncProgress = 0.8;
+      });
+
+      _addLog('📥 Buscando eventos modificados...');
+      final agendasNuevas = await apiService.obtenerAgendaIncremental(
+        fechaDesde,
+        comercialId,
+      );
+
+      if (agendasNuevas.isNotEmpty) {
+        await db.insertarAgendasLote(
+          agendasNuevas.cast<Map<String, dynamic>>(),
+        );
+        _addLog('✅ ${agendasNuevas.length} eventos actualizados');
+      } else {
+        _addLog('✓ No hay eventos nuevos');
+      }
+
+      // Guardar timestamp
+      await prefs.setInt(
+        'ultima_sincronizacion',
+        DateTime.now().millisecondsSinceEpoch,
+      );
+
+      setState(() {
+        _syncProgress = 1.0;
+        _syncStatus = 'Actualización completada';
+        _isSyncing = false;
+      });
+
+      _addLog('🎉 Actualización incremental completada');
+
+      final totalActualizados =
+          pedidosNuevos.length +
+          presupuestosNuevos.length +
+          leadsNuevos.length +
+          agendasNuevas.length;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            totalActualizados > 0
+                ? '✅ $totalActualizados registro(s) actualizados'
+                : '✓ Todos los datos están al día',
+          ),
+          backgroundColor: const Color(0xFF032458),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      _addLog('❌ ERROR: $e');
+
+      setState(() {
+        _isSyncing = false;
+        _syncStatus = 'Error';
+        _syncProgress = 0.0;
+      });
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Error'),
+          content: SingleChildScrollView(
+            child: SelectableText(e.toString().replaceAll('Exception: ', '')),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
   // ... (El resto del fichero configuracion_screen.dart no cambia) ...
 
   Future<void> _limpiarDatos() async {
@@ -822,6 +1089,18 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                 padding: const EdgeInsets.all(16),
               ),
             ),
+
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: _isSyncing ? null : _sincronizacionIncremental,
+            icon: const Icon(Icons.update),
+            label: const Text('Actualización Rápida (Solo Cambios)'),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.all(16),
+              backgroundColor: const Color(0xFF4CAF50),
+              foregroundColor: Colors.white,
+            ),
+          ),
           const SizedBox(height: 32),
           const Divider(),
           const SizedBox(height: 16),

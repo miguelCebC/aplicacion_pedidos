@@ -2410,6 +2410,641 @@ class VelneoAPIService {
       return false;
     }
   }
+  // Añadir al final de la clase VelneoAPIService en lib/services/api_service.dart (antes del último })
+
+  Future<List<dynamic>> obtenerPedidosIncrementales(DateTime? desde) async {
+    try {
+      final allPedidos = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+      bool deberiasContinuar = true;
+
+      _log(
+        '📄 Descargando pedidos incrementales desde: ${desde?.toIso8601String() ?? "inicio"}',
+      );
+
+      while (deberiasContinuar) {
+        final params = {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+          'sort': '-mod_tim', // Más recientes primero
+        };
+
+        final url = _buildUrlWithParams('/VTA_PED_G', params);
+
+        try {
+          final response = await _getWithSSL(
+            url,
+          ).timeout(const Duration(seconds: 45));
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+
+            if (data['vta_ped_g'] != null && data['vta_ped_g'] is List) {
+              final listaPedidos = data['vta_ped_g'] as List;
+
+              if (listaPedidos.isEmpty) {
+                _log('  🏁 No hay más pedidos');
+                break;
+              }
+
+              // Filtrar por fecha de modificación
+              final pedidosFiltrados = <Map<String, dynamic>>[];
+              for (var pedido in listaPedidos) {
+                if (desde != null && pedido['mod_tim'] != null) {
+                  try {
+                    final fechaMod = DateTime.parse(
+                      pedido['mod_tim'].toString(),
+                    );
+                    if (fechaMod.isBefore(desde)) {
+                      // Ya llegamos a pedidos más antiguos, parar
+                      deberiasContinuar = false;
+                      break;
+                    }
+                  } catch (e) {
+                    _log('  ⚠️ Error parseando fecha: $e');
+                  }
+                }
+
+                pedidosFiltrados.add({
+                  'id': pedido['id'],
+                  'cliente_id': pedido['clt'] ?? 0,
+                  'cmr': pedido['cmr'] ?? 0,
+                  'fecha': pedido['fch'] ?? DateTime.now().toIso8601String(),
+                  'numero': pedido['num_ped'] ?? '',
+                  'estado': pedido['est'] ?? '',
+                  'observaciones': pedido['obs'] ?? '',
+                  'total': _convertirADouble(pedido['tot_ped']),
+                  'sincronizado': 1,
+                });
+              }
+
+              allPedidos.addAll(pedidosFiltrados);
+              _log(
+                '  ✅ Página $page: ${pedidosFiltrados.length} pedidos nuevos (${listaPedidos.length} totales)',
+              );
+
+              if (listaPedidos.length < pageSize || !deberiasContinuar) {
+                break;
+              }
+
+              page++;
+              await Future.delayed(const Duration(milliseconds: 200));
+            } else {
+              break;
+            }
+          } else {
+            throw Exception('Error HTTP ${response.statusCode}');
+          }
+        } catch (e) {
+          _log('  ❌ Error en página $page: $e');
+          if (allPedidos.isEmpty) rethrow;
+          break;
+        }
+      }
+
+      _log('✅ TOTAL pedidos incrementales: ${allPedidos.length}');
+      return allPedidos;
+    } catch (e) {
+      _log('❌ Error en obtenerPedidosIncrementales: $e');
+      rethrow;
+    }
+  }
+
+  Future<List<dynamic>> obtenerPresupuestosIncrementales(
+    DateTime? desde,
+  ) async {
+    try {
+      final allPresupuestos = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+      bool deberiasContinuar = true;
+
+      _log(
+        '📄 Descargando presupuestos incrementales desde: ${desde?.toIso8601String() ?? "inicio"}',
+      );
+
+      while (deberiasContinuar) {
+        final params = {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+          'sort': '-mod_tim',
+        };
+
+        final url = _buildUrlWithParams('/VTA_PRE_G', params);
+
+        try {
+          final response = await _getWithSSL(
+            url,
+          ).timeout(const Duration(seconds: 45));
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+
+            if (data['vta_pre_g'] != null && data['vta_pre_g'] is List) {
+              final listaPresupuestos = data['vta_pre_g'] as List;
+
+              if (listaPresupuestos.isEmpty) {
+                _log('  🏁 No hay más presupuestos');
+                break;
+              }
+
+              final presupuestosFiltrados = <Map<String, dynamic>>[];
+              for (var presupuesto in listaPresupuestos) {
+                if (desde != null && presupuesto['mod_tim'] != null) {
+                  try {
+                    final fechaMod = DateTime.parse(
+                      presupuesto['mod_tim'].toString(),
+                    );
+                    if (fechaMod.isBefore(desde)) {
+                      deberiasContinuar = false;
+                      break;
+                    }
+                  } catch (e) {
+                    _log('  ⚠️ Error parseando fecha: $e');
+                  }
+                }
+
+                presupuestosFiltrados.add({
+                  'id': presupuesto['id'],
+                  'cliente_id': presupuesto['clt'] ?? 0,
+                  'comercial_id': presupuesto['cmr'] ?? 0,
+                  'fecha':
+                      presupuesto['fch'] ?? DateTime.now().toIso8601String(),
+                  'numero': presupuesto['num'] ?? '',
+                  'estado': presupuesto['est'] ?? '',
+                  'observaciones': presupuesto['obs'] ?? '',
+                  'total': _convertirADouble(presupuesto['tot']),
+                  'sincronizado': 1,
+                });
+              }
+
+              allPresupuestos.addAll(presupuestosFiltrados);
+              _log(
+                '  ✅ Página $page: ${presupuestosFiltrados.length} presupuestos nuevos',
+              );
+
+              if (listaPresupuestos.length < pageSize || !deberiasContinuar) {
+                break;
+              }
+
+              page++;
+              await Future.delayed(const Duration(milliseconds: 200));
+            } else {
+              break;
+            }
+          } else {
+            throw Exception('Error HTTP ${response.statusCode}');
+          }
+        } catch (e) {
+          _log('  ❌ Error en página $page: $e');
+          if (allPresupuestos.isEmpty) rethrow;
+          break;
+        }
+      }
+
+      _log('✅ TOTAL presupuestos incrementales: ${allPresupuestos.length}');
+      return allPresupuestos;
+    } catch (e) {
+      _log('❌ Error en obtenerPresupuestosIncrementales: $e');
+      rethrow;
+    }
+  }
+
+  Future<List<dynamic>> obtenerLeadsIncrementales(DateTime? desde) async {
+    try {
+      final allLeads = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+      bool deberiasContinuar = true;
+
+      _log(
+        '📄 Descargando leads incrementales desde: ${desde?.toIso8601String() ?? "inicio"}',
+      );
+
+      while (deberiasContinuar) {
+        final params = {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+          'sort': '-mod_tim',
+        };
+
+        final url = _buildUrlWithParams('/CRM_LEA', params);
+
+        try {
+          final response = await _getWithSSL(
+            url,
+          ).timeout(const Duration(seconds: 45));
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+
+            if (data['crm_lea'] != null && data['crm_lea'] is List) {
+              final listaLeads = data['crm_lea'] as List;
+
+              if (listaLeads.isEmpty) {
+                _log('  🏁 No hay más leads');
+                break;
+              }
+
+              final leadsFiltrados = <Map<String, dynamic>>[];
+              for (var lead in listaLeads) {
+                if (desde != null && lead['mod_tim'] != null) {
+                  try {
+                    final fechaMod = DateTime.parse(lead['mod_tim'].toString());
+                    if (fechaMod.isBefore(desde)) {
+                      deberiasContinuar = false;
+                      break;
+                    }
+                  } catch (e) {
+                    _log('  ⚠️ Error parseando fecha: $e');
+                  }
+                }
+
+                leadsFiltrados.add({
+                  'id': lead['id'],
+                  'nombre': lead['name'] ?? '',
+                  'fecha_alta': lead['fch_alt'],
+                  'campana_id': lead['crm_cam_com'] ?? 0,
+                  'cliente_id': lead['cli'] ?? 0,
+                  'asunto': lead['asu'] ?? '',
+                  'descripcion': lead['dsc'] ?? '',
+                  'comercial_id': lead['com'] ?? 0,
+                  'estado': lead['crm_est_lea'] ?? '',
+                  'fecha': lead['fch'],
+                  'enviado': (lead['env'] == true) ? 1 : 0,
+                  'agendado': (lead['age'] == true) ? 1 : 0,
+                  'agenda_id': lead['crm_age'] ?? 0,
+                });
+              }
+
+              allLeads.addAll(leadsFiltrados);
+              _log('  ✅ Página $page: ${leadsFiltrados.length} leads nuevos');
+
+              if (listaLeads.length < pageSize || !deberiasContinuar) {
+                break;
+              }
+
+              page++;
+              await Future.delayed(const Duration(milliseconds: 200));
+            } else {
+              break;
+            }
+          } else {
+            throw Exception('Error HTTP ${response.statusCode}');
+          }
+        } catch (e) {
+          _log('  ❌ Error en página $page: $e');
+          if (allLeads.isEmpty) rethrow;
+          break;
+        }
+      }
+
+      _log('✅ TOTAL leads incrementales: ${allLeads.length}');
+      return allLeads;
+    } catch (e) {
+      _log('❌ Error en obtenerLeadsIncrementales: $e');
+      rethrow;
+    }
+  }
+
+  Future<List<dynamic>> obtenerAgendaIncremental(
+    DateTime? desde, [
+    int? comercialId,
+  ]) async {
+    try {
+      final allAgendas = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+      bool deberiasContinuar = true;
+
+      DebugLogger.log(
+        '📄 Descargando agenda incremental desde: ${desde?.toIso8601String() ?? "inicio"}',
+      );
+
+      while (deberiasContinuar) {
+        final params = {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+          'sort': '-mod_tim',
+        };
+
+        if (comercialId != null) {
+          params['com'] = comercialId.toString();
+        }
+
+        final url = _buildUrlWithParams('/CRM_AGE', params);
+
+        try {
+          final response = await _getWithSSL(
+            url,
+          ).timeout(const Duration(seconds: 45));
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+
+            if (data['crm_age'] != null && data['crm_age'] is List) {
+              final agendasList = data['crm_age'] as List;
+
+              if (agendasList.isEmpty) {
+                DebugLogger.log('  🏁 No hay más eventos');
+                break;
+              }
+
+              final agendasFiltradas = <Map<String, dynamic>>[];
+              for (var agenda in agendasList) {
+                // Validar que tenga fecha de inicio
+                if (agenda['fch_ini'] == null ||
+                    agenda['fch_ini'].toString().isEmpty) {
+                  continue;
+                }
+
+                if (desde != null && agenda['mod_tim'] != null) {
+                  try {
+                    final fechaMod = DateTime.parse(
+                      agenda['mod_tim'].toString(),
+                    );
+                    if (fechaMod.isBefore(desde)) {
+                      deberiasContinuar = false;
+                      break;
+                    }
+                  } catch (e) {
+                    DebugLogger.log('  ⚠️ Error parseando fecha: $e');
+                  }
+                }
+
+                String? limpiarFecha(dynamic fecha) {
+                  if (fecha == null) return null;
+                  return fecha.toString().replaceAll(RegExp(r'[TZ].*'), '');
+                }
+
+                String? limpiarHora(dynamic hora) {
+                  if (hora == null) return null;
+                  final str = hora.toString().trim();
+                  if (str.isEmpty) return null;
+                  if (RegExp(r'^\d{2}:\d{2}$').hasMatch(str)) return str;
+                  if (RegExp(r'^\d{2}:\d{2}:\d{2}').hasMatch(str))
+                    return str.substring(0, 5);
+                  return null;
+                }
+
+                agendasFiltradas.add({
+                  'id': agenda['id'],
+                  'nombre': agenda['name'] ?? '',
+                  'cliente_id': agenda['cli'] ?? 0,
+                  'tipo_visita': agenda['tip_vis'] ?? 0,
+                  'asunto': agenda['asu'] ?? '',
+                  'comercial_id': agenda['com'] ?? 0,
+                  'campana_id': agenda['crm_cam_com'] ?? 0,
+                  'fecha_inicio': limpiarFecha(agenda['fch_ini']) ?? '',
+                  'hora_inicio': limpiarHora(agenda['hor_ini']) ?? '',
+                  'fecha_fin': limpiarFecha(agenda['fch_fin']) ?? '',
+                  'hora_fin': limpiarHora(agenda['hor_fin']) ?? '',
+                  'fecha_proxima_visita':
+                      limpiarFecha(agenda['fch_pro_vis']) ?? '',
+                  'hora_proxima_visita':
+                      limpiarHora(agenda['hor_pro_vis']) ?? '',
+                  'descripcion': agenda['dsc'] ?? '',
+                  'todo_dia': (agenda['tod_dia'] == true) ? 1 : 0,
+                  'lead_id': agenda['crm_lea'] ?? 0,
+                  'presupuesto_id': agenda['vta_pre_g'] ?? 0,
+                  'generado': (agenda['gen'] == true) ? 1 : 0,
+                  'sincronizado': 1,
+                  'no_gen_pro_vis': agenda['no_gen_pro_vis'] ?? false,
+                  'no_gen_tri': agenda['no_gen_tri'] ?? false,
+                });
+              }
+
+              allAgendas.addAll(agendasFiltradas);
+              DebugLogger.log(
+                '  ✅ Página $page: ${agendasFiltradas.length} eventos nuevos',
+              );
+
+              if (agendasList.length < pageSize || !deberiasContinuar) {
+                break;
+              }
+
+              page++;
+              await Future.delayed(const Duration(milliseconds: 200));
+            } else {
+              break;
+            }
+          } else {
+            throw Exception('Error HTTP ${response.statusCode}');
+          }
+        } catch (e) {
+          DebugLogger.log('  ❌ Error en página $page: $e');
+          if (allAgendas.isEmpty) rethrow;
+          break;
+        }
+      }
+
+      DebugLogger.log('✅ TOTAL agenda incremental: ${allAgendas.length}');
+      return allAgendas;
+    } catch (e) {
+      DebugLogger.log('❌ Error en obtenerAgendaIncremental: $e');
+      rethrow;
+    }
+  }
+  // Añadir después de obtenerAgendaIncremental() en lib/services/api_service.dart
+
+  Future<List<dynamic>> obtenerArticulosIncrementales(DateTime? desde) async {
+    try {
+      final allArticulos = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+      bool deberiasContinuar = true;
+
+      print(
+        '📄 Descargando artículos incrementales desde: ${desde?.toIso8601String() ?? "inicio"}',
+      );
+
+      while (deberiasContinuar) {
+        final params = {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+          'sort': '-mod_tim', // Más recientes primero
+        };
+
+        final url = _buildUrlWithParams('/ART_M', params);
+
+        try {
+          final response = await _getWithSSL(
+            url,
+          ).timeout(const Duration(seconds: 45));
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+
+            if (data['art_m'] != null && data['art_m'] is List) {
+              final articulosList = data['art_m'] as List;
+
+              if (articulosList.isEmpty) {
+                print('  🏁 No hay más artículos');
+                break;
+              }
+
+              // Filtrar por fecha de modificación
+              final articulosFiltrados = <Map<String, dynamic>>[];
+              for (var articulo in articulosList) {
+                if (desde != null && articulo['mod_tim'] != null) {
+                  try {
+                    final fechaMod = DateTime.parse(
+                      articulo['mod_tim'].toString(),
+                    );
+                    if (fechaMod.isBefore(desde)) {
+                      deberiasContinuar = false;
+                      break;
+                    }
+                  } catch (e) {
+                    print('  ⚠️ Error parseando fecha: $e');
+                  }
+                }
+
+                articulosFiltrados.add({
+                  'id': articulo['id'],
+                  'codigo': articulo['ref'] ?? '',
+                  'nombre': articulo['name'] ?? 'Sin nombre',
+                  'descripcion': articulo['name'] ?? 'Sin descripción',
+                  'precio': _convertirADouble(articulo['pvp']),
+                  'stock': articulo['exs'] ?? 0,
+                });
+              }
+
+              allArticulos.addAll(articulosFiltrados);
+              print(
+                '  ✅ Página $page: ${articulosFiltrados.length} artículos nuevos (${articulosList.length} totales)',
+              );
+
+              if (articulosList.length < pageSize || !deberiasContinuar) {
+                break;
+              }
+
+              page++;
+              await Future.delayed(const Duration(milliseconds: 200));
+            } else {
+              break;
+            }
+          } else {
+            throw Exception('Error HTTP ${response.statusCode}');
+          }
+        } catch (e) {
+          print('  ❌ Error en página $page: $e');
+          if (allArticulos.isEmpty) rethrow;
+          break;
+        }
+      }
+
+      print('✅ TOTAL artículos incrementales: ${allArticulos.length}');
+      return allArticulos;
+    } catch (e) {
+      print('❌ Error en obtenerArticulosIncrementales: $e');
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> obtenerClientesIncrementales(
+    DateTime? desde,
+  ) async {
+    try {
+      final allClientes = <dynamic>[];
+      final allComerciales = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+      bool deberiasContinuar = true;
+
+      print(
+        '📄 Descargando clientes/comerciales incrementales desde: ${desde?.toIso8601String() ?? "inicio"}',
+      );
+
+      while (deberiasContinuar) {
+        final params = {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+          'sort': '-mod_tim',
+        };
+
+        final url = _buildUrlWithParams('/ENT_M', params);
+
+        try {
+          final response = await _getWithSSL(
+            url,
+          ).timeout(const Duration(seconds: 45));
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+
+            if (data['ent_m'] != null && data['ent_m'] is List) {
+              final entidadesList = data['ent_m'] as List;
+
+              if (entidadesList.isEmpty) {
+                print('  🏁 No hay más registros');
+                break;
+              }
+
+              // Filtrar por fecha de modificación
+              for (var entidad in entidadesList) {
+                if (desde != null && entidad['mod_tim'] != null) {
+                  try {
+                    final fechaMod = DateTime.parse(
+                      entidad['mod_tim'].toString(),
+                    );
+                    if (fechaMod.isBefore(desde)) {
+                      deberiasContinuar = false;
+                      break;
+                    }
+                  } catch (e) {
+                    print('  ⚠️ Error parseando fecha: $e');
+                  }
+                }
+
+                final registro = {
+                  'id': entidad['id'],
+                  'nombre': entidad['nom_fis'] ?? 'Sin nombre',
+                  'email': entidad['eml'] ?? '',
+                  'telefono': entidad['tlf'] ?? '',
+                  'direccion': entidad['dir'] ?? '',
+                };
+
+                if (entidad['es_cmr'] == true) {
+                  allComerciales.add(registro);
+                } else {
+                  allClientes.add(registro);
+                }
+              }
+
+              print(
+                '  ✅ Página $page: Clientes: ${allClientes.length}, Comerciales: ${allComerciales.length}',
+              );
+
+              if (entidadesList.length < pageSize || !deberiasContinuar) {
+                break;
+              }
+
+              page++;
+              await Future.delayed(const Duration(milliseconds: 200));
+            } else {
+              break;
+            }
+          } else {
+            throw Exception('Error HTTP ${response.statusCode}');
+          }
+        } catch (e) {
+          print('  ❌ Error en página $page: $e');
+          if (allClientes.isEmpty && allComerciales.isEmpty) rethrow;
+          break;
+        }
+      }
+
+      print('✅ TOTAL clientes incrementales: ${allClientes.length}');
+      print('✅ TOTAL comerciales incrementales: ${allComerciales.length}');
+
+      return {'clientes': allClientes, 'comerciales': allComerciales};
+    } catch (e) {
+      print('❌ Error en obtenerClientesIncrementales: $e');
+      rethrow;
+    }
+  }
 
   void dispose() {
     _client.close();

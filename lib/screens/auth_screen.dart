@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import 'home_screen.dart';
+import '../services/api_service.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -100,6 +101,9 @@ class _AuthScreenState extends State<AuthScreen> {
       });
     }
   }
+  // Reemplazar el método _validarContrasena() en lib/screens/auth_screen.dart (líneas ~87-121)
+
+  // Reemplazar el método _validarContrasena() en lib/screens/auth_screen.dart
 
   Future<void> _validarContrasena() async {
     final comercialId = int.tryParse(_comercialIdController.text.trim());
@@ -142,9 +146,15 @@ class _AuthScreenState extends State<AuthScreen> {
         return;
       }
 
+      // Mostrar loading mínimo 3 segundos
+      await Future.delayed(const Duration(seconds: 3));
+
+      // Lanzar sincronización en segundo plano (sin await)
+      _sincronizacionRapidaEnSegundoPlano();
+
       if (!mounted) return;
 
-      // Ir a home
+      // Ir a home inmediatamente
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (context) => const HomeScreen()),
       );
@@ -154,6 +164,172 @@ class _AuthScreenState extends State<AuthScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  // Actualizar el método _sincronizacionRapidaEnSegundoPlano() para que sea verdadero segundo plano
+
+  Future<void> _sincronizacionRapidaEnSegundoPlano() async {
+    // Ejecutar en segundo plano sin bloquear navegación
+    Future.delayed(Duration.zero, () async {
+      try {
+        print('🔄 [BACKGROUND] Iniciando sincronización rápida...');
+
+        final prefs = await SharedPreferences.getInstance();
+        String? url = prefs.getString('velneo_url');
+        String? apiKey = prefs.getString('velneo_api_key');
+        final comercialId = prefs.getInt('comercial_id');
+        final ultimaSincMs = prefs.getInt('ultima_sincronizacion') ?? 0;
+
+        if (url == null || apiKey == null || url.isEmpty || apiKey.isEmpty) {
+          print('⚠️ [BACKGROUND] No hay configuración de API');
+          return;
+        }
+
+        if (ultimaSincMs == 0) {
+          print(
+            '⚠️ [BACKGROUND] Primera vez - omitiendo sincronización automática',
+          );
+          return;
+        }
+
+        final fechaDesde = DateTime.fromMillisecondsSinceEpoch(
+          ultimaSincMs,
+        ).subtract(const Duration(hours: 1));
+
+        print(
+          '📅 [BACKGROUND] Buscando cambios desde: ${fechaDesde.toIso8601String()}',
+        );
+
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          url = 'https://$url';
+        }
+
+        final apiService = VelneoAPIService(url, apiKey);
+        final db = DatabaseHelper.instance;
+
+        // Artículos
+        print('📥 [BACKGROUND] Actualizando artículos...');
+        final articulosNuevos = await apiService.obtenerArticulosIncrementales(
+          fechaDesde,
+        );
+        if (articulosNuevos.isNotEmpty) {
+          await db.insertarArticulosLote(
+            articulosNuevos.cast<Map<String, dynamic>>(),
+          );
+          print(
+            '✅ [BACKGROUND] ${articulosNuevos.length} artículos actualizados',
+          );
+        }
+
+        // Clientes y comerciales
+        print('📥 [BACKGROUND] Actualizando clientes y comerciales...');
+        final resultadoClientes = await apiService.obtenerClientesIncrementales(
+          fechaDesde,
+        );
+        final clientesNuevos = resultadoClientes['clientes'] as List;
+        final comercialesNuevos = resultadoClientes['comerciales'] as List;
+
+        if (clientesNuevos.isNotEmpty) {
+          await db.insertarClientesLote(
+            clientesNuevos.cast<Map<String, dynamic>>(),
+          );
+          print(
+            '✅ [BACKGROUND] ${clientesNuevos.length} clientes actualizados',
+          );
+        }
+
+        if (comercialesNuevos.isNotEmpty) {
+          await db.insertarComercialesLote(
+            comercialesNuevos.cast<Map<String, dynamic>>(),
+          );
+          print(
+            '✅ [BACKGROUND] ${comercialesNuevos.length} comerciales actualizados',
+          );
+        }
+
+        // Pedidos
+        print('📥 [BACKGROUND] Actualizando pedidos...');
+        final pedidosNuevos = await apiService.obtenerPedidosIncrementales(
+          fechaDesde,
+        );
+        if (pedidosNuevos.isNotEmpty) {
+          await db.insertarPedidosLote(
+            pedidosNuevos.cast<Map<String, dynamic>>(),
+          );
+          print('✅ [BACKGROUND] ${pedidosNuevos.length} pedidos actualizados');
+
+          final lineasPedido = await apiService.obtenerTodasLineasPedido();
+          await db.insertarLineasPedidoLote(
+            lineasPedido.cast<Map<String, dynamic>>(),
+          );
+          print('✅ [BACKGROUND] Líneas de pedido actualizadas');
+        }
+
+        // Presupuestos
+        print('📥 [BACKGROUND] Actualizando presupuestos...');
+        final presupuestosNuevos = await apiService
+            .obtenerPresupuestosIncrementales(fechaDesde);
+        if (presupuestosNuevos.isNotEmpty) {
+          await db.insertarPresupuestosLote(
+            presupuestosNuevos.cast<Map<String, dynamic>>(),
+          );
+          print(
+            '✅ [BACKGROUND] ${presupuestosNuevos.length} presupuestos actualizados',
+          );
+
+          final lineasPresupuesto = await apiService
+              .obtenerTodasLineasPresupuesto();
+          await db.insertarLineasPresupuestoLote(
+            lineasPresupuesto.cast<Map<String, dynamic>>(),
+          );
+          print('✅ [BACKGROUND] Líneas de presupuesto actualizadas');
+        }
+
+        // Leads
+        print('📥 [BACKGROUND] Actualizando leads...');
+        final leadsNuevos = await apiService.obtenerLeadsIncrementales(
+          fechaDesde,
+        );
+        if (leadsNuevos.isNotEmpty) {
+          await db.insertarLeadsLote(leadsNuevos.cast<Map<String, dynamic>>());
+          print('✅ [BACKGROUND] ${leadsNuevos.length} leads actualizados');
+        }
+
+        // Agenda
+        print('📥 [BACKGROUND] Actualizando agenda...');
+        final agendasNuevas = await apiService.obtenerAgendaIncremental(
+          fechaDesde,
+          comercialId,
+        );
+        if (agendasNuevas.isNotEmpty) {
+          await db.insertarAgendasLote(
+            agendasNuevas.cast<Map<String, dynamic>>(),
+          );
+          print('✅ [BACKGROUND] ${agendasNuevas.length} eventos actualizados');
+        }
+
+        // Guardar timestamp
+        await prefs.setInt(
+          'ultima_sincronizacion',
+          DateTime.now().millisecondsSinceEpoch,
+        );
+
+        final totalActualizados =
+            articulosNuevos.length +
+            clientesNuevos.length +
+            comercialesNuevos.length +
+            pedidosNuevos.length +
+            presupuestosNuevos.length +
+            leadsNuevos.length +
+            agendasNuevas.length;
+
+        print(
+          '🎉 [BACKGROUND] Sincronización completada: $totalActualizados cambios',
+        );
+      } catch (e) {
+        print('⚠️ [BACKGROUND] Error en sincronización (no crítico): $e');
+      }
+    });
   }
 
   @override
