@@ -355,8 +355,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Leads
       setState(() => _statusMessage = 'Descargando leads...');
-      _addLog('📥 Descargando leads...');
-      final leadsLista = await apiService.obtenerLeads();
+      _addLog('📥 Descargando leads del comercial $comercialId...');
+      final leadsLista = await apiService.obtenerLeads(comercialId);
       await db.limpiarLeads();
       await db.insertarLeadsLote(leadsLista.cast<Map<String, dynamic>>());
       _addLog('✅ ${leadsLista.length} leads guardados');
@@ -371,8 +371,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Pedidos
       setState(() => _statusMessage = 'Descargando pedidos...');
-      _addLog('📥 Descargando pedidos...');
-      final pedidosLista = await apiService.obtenerPedidos();
+      _addLog('📥 Descargando pedidos del comercial $comercialId...');
+      final pedidosLista = await apiService.obtenerPedidos(comercialId);
       await db.limpiarPedidos();
       await db.insertarPedidosLote(pedidosLista.cast<Map<String, dynamic>>());
       _addLog('✅ ${pedidosLista.length} pedidos guardados');
@@ -386,14 +386,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Presupuestos
       setState(() => _statusMessage = 'Descargando presupuestos...');
-      _addLog('📥 Descargando presupuestos...');
-      final presupuestosLista = await apiService.obtenerPresupuestos();
+      _addLog('📥 Descargando presupuestos del comercial $comercialId...');
+      final presupuestosLista = await apiService.obtenerPresupuestos(
+        comercialId,
+      );
       await db.limpiarPresupuestos();
       await db.insertarPresupuestosLote(
         presupuestosLista.cast<Map<String, dynamic>>(),
       );
       _addLog('✅ ${presupuestosLista.length} presupuestos guardados');
-
       _addLog('📥 Descargando líneas de presupuesto...');
       final lineasPresupuesto = await apiService
           .obtenerTodasLineasPresupuesto();

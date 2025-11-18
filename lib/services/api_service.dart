@@ -263,23 +263,29 @@ class VelneoAPIService {
     }
   }
 
-  Future<List<dynamic>> obtenerPedidos() async {
+  Future<List<dynamic>> obtenerPedidos([int? comercialId]) async {
     try {
       final allPedidos = <dynamic>[];
       int page = 1;
       const int pageSize = 1000;
       int totalCount = 0;
 
-      _log('📄 Descargando pedidos desde Velneo...');
+      _log(
+        '📄 Descargando pedidos${comercialId != null ? ' del comercial $comercialId' : ''}...',
+      );
 
       while (true) {
-        final url = _buildUrlWithParams('/VTA_PED_G', {
+        final params = {
           'page[number]': page.toString(),
           'page[size]': pageSize.toString(),
-        });
+        };
 
-        _log('  📥 Página $page - URL: $url');
+        // Agregar filtro de comercial si se proporciona
+        if (comercialId != null) {
+          params['filter[cmr]'] = comercialId.toString();
+        }
 
+        final url = _buildUrlWithParams('/VTA_PED_G', params);
         try {
           final response = await _getWithSSL(
             url,
@@ -360,21 +366,29 @@ class VelneoAPIService {
     }
   }
 
-  Future<List<dynamic>> obtenerPresupuestos() async {
+  Future<List<dynamic>> obtenerPresupuestos([int? comercialId]) async {
     try {
       final allPresupuestos = <dynamic>[];
       int page = 1;
       const int pageSize = 1000;
       int totalCount = 0;
 
-      _log('📄 Descargando presupuestos desde Velneo...');
+      _log(
+        '📄 Descargando presupuestos${comercialId != null ? ' del comercial $comercialId' : ''}...',
+      );
 
       while (true) {
-        final url = _buildUrlWithParams('/VTA_PRE_G', {
+        final params = {
           'page[number]': page.toString(),
           'page[size]': pageSize.toString(),
-        });
+        };
 
+        // Agregar filtro de comercial si se proporciona
+        if (comercialId != null) {
+          params['filter[cmr]'] = comercialId.toString();
+        }
+
+        final url = _buildUrlWithParams('/VTA_PRE_G', params);
         _log('  📥 Página $page - URL: $url');
 
         try {
@@ -644,20 +658,29 @@ class VelneoAPIService {
     }
   }
 
-  Future<List<dynamic>> obtenerLeads() async {
+  Future<List<dynamic>> obtenerLeads([int? comercialId]) async {
     try {
       final allLeads = <dynamic>[];
       int page = 1;
       const int pageSize = 1000;
       int totalCount = 0;
 
-      print('📄 Descargando leads...');
+      print(
+        '📄 Descargando leads${comercialId != null ? ' del comercial $comercialId' : ''}...',
+      );
 
       while (true) {
-        final url = _buildUrlWithParams('/CRM_LEA', {
+        final params = {
           'page[number]': page.toString(),
           'page[size]': pageSize.toString(),
-        });
+        };
+
+        // Agregar filtro de comercial si se proporciona
+        if (comercialId != null) {
+          params['filter[cmr]'] = comercialId.toString();
+        }
+
+        final url = _buildUrlWithParams('/CRM_LEA', params);
 
         print('  📥 Página $page');
 
