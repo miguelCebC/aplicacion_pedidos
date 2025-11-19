@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../database_helper.dart';
 import '../models/models.dart';
+import 'editar_pedido_screen.dart';
 
 class DetallePedidoScreen extends StatefulWidget {
   final Map<String, dynamic> pedido;
@@ -55,6 +56,9 @@ class _DetallePedidoScreenState extends State<DetallePedidoScreen> {
           articuloCodigo: articulo['codigo'],
           cantidad: linea['cantidad'],
           precio: linea['precio'],
+          porDescuento: linea['por_descuento'] ?? 0.0,
+          porIva: linea['por_iva'] ?? 0.0,
+          tipoIva: linea['tipo_iva'] ?? 'G',
         ),
       );
     }
@@ -78,10 +82,44 @@ class _DetallePedidoScreenState extends State<DetallePedidoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pedido ${widget.pedido['numero']}')),
+      appBar: AppBar(
+        title: Text(
+          'Pedido ${widget.pedido['numero'] ?? '#${widget.pedido['id']}'}',
+        ),
+        backgroundColor: const Color(0xFF162846),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () async {
+              final resultado = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      EditarPedidoScreen(pedido: widget.pedido),
+                ),
+              );
+              if (resultado == true) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Pedido actualizado. Cierra y vuelve a abrir para ver los cambios.',
+                    ),
+                    backgroundColor: Color(0xFF032458),
+                  ),
+                );
+                // Volver a la lista de pedidos
+                Navigator.pop(context, true);
+              }
+            },
+            tooltip: 'Editar pedido',
+          ),
+        ],
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
+              // ... resto del código sin cambios
               padding: const EdgeInsets.all(16.0),
               children: [
                 Card(

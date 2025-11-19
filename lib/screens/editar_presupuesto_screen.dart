@@ -7,24 +7,160 @@ import '../widgets/buscar_cliente_dialog.dart';
 import '../widgets/buscar_articulo_dialog.dart';
 import '../widgets/editar_linea_dialog.dart';
 
-class CrearPedidoScreen extends StatefulWidget {
-  const CrearPedidoScreen({super.key});
+class EditarPresupuestoScreen extends StatefulWidget {
+  final Map<String, dynamic> presupuesto;
+
+  const EditarPresupuestoScreen({super.key, required this.presupuesto});
 
   @override
-  State<CrearPedidoScreen> createState() => _CrearPedidoScreenState();
+  State<EditarPresupuestoScreen> createState() =>
+      _EditarPresupuestoScreenState();
 }
 
-class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
+class _EditarPresupuestoScreenState extends State<EditarPresupuestoScreen> {
   Map<String, dynamic>? _clienteSeleccionado;
   final _observacionesController = TextEditingController();
   final List<LineaPedidoData> _lineas = [];
-  bool _isLoading = false;
+  bool _isLoading = true;
   bool _guardando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarDatos();
+  }
 
   @override
   void dispose() {
     _observacionesController.dispose();
     super.dispose();
+  }
+
+  // 🔥 MÉTODO DEBUG PARA VER ESTRUCTURA DE LÍNEAS
+  Future<void> _debugVerLineas() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      String url = prefs.getString('velneo_url') ?? '';
+      final String apiKey = prefs.getString('velneo_api_key') ?? '';
+
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://$url';
+      }
+
+      final apiService = VelneoAPIService(url, apiKey);
+
+      // Obtener líneas del servidor
+      final lineasServidor = await apiService.obtenerLineasPresupuesto(
+        widget.presupuesto['id'],
+      );
+
+      String mensaje = '📋 LÍNEAS EN EL SERVIDOR:\n\n';
+      mensaje += 'Total: ${lineasServidor.length} líneas\n\n';
+
+      for (int i = 0; i < lineasServidor.length; i++) {
+        final linea = lineasServidor[i];
+        mensaje += '═══ LÍNEA ${i + 1} ═══\n';
+        mensaje += 'Todos los campos:\n';
+        linea.forEach((key, value) {
+          mensaje += '  $key: $value\n';
+        });
+        mensaje += '\n';
+      }
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('🔍 DEBUG: Estructura de Líneas'),
+          content: SingleChildScrollView(
+            child: SelectableText(
+              mensaje,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('❌ Error'),
+          content: Text('Error al obtener líneas: $e'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Future<void> _cargarDatos() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final db = DatabaseHelper.instance;
+
+      // Cargar cliente
+      final clientes = await db.obtenerClientes();
+      final cliente = clientes.firstWhere(
+        (c) => c['id'] == widget.presupuesto['cliente_id'],
+        orElse: () => {
+          'id': widget.presupuesto['cliente_id'],
+          'nombre': 'Cliente no encontrado',
+        },
+      );
+
+      // Cargar líneas del presupuesto
+      final lineasRaw = await db.obtenerLineasPresupuesto(
+        widget.presupuesto['id'],
+      );
+      final articulos = await db.obtenerArticulos();
+
+      final lineasCargadas = <LineaPedidoData>[];
+      for (var linea in lineasRaw) {
+        final articulo = articulos.firstWhere(
+          (a) => a['id'] == linea['articulo_id'],
+          orElse: () => {
+            'id': linea['articulo_id'],
+            'nombre': 'Artículo no encontrado',
+            'codigo': 'N/A',
+            'precio': 0.0,
+          },
+        );
+
+        lineasCargadas.add(
+          LineaPedidoData(
+            articulo: articulo,
+            cantidad: (linea['cantidad'] as num).toDouble(),
+            precio: (linea['precio'] as num).toDouble(),
+            descuento: (linea['por_descuento'] as num?)?.toDouble() ?? 0.0,
+            tipoIva: 'G',
+          ),
+        );
+      }
+
+      setState(() {
+        _clienteSeleccionado = cliente;
+        _observacionesController.text =
+            widget.presupuesto['observaciones'] ?? '';
+        _lineas.addAll(lineasCargadas);
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error cargando datos: $e');
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _seleccionarCliente() async {
@@ -67,7 +203,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
           cantidad: 1,
           precio: precioInfo['precio']!,
           descuento: precioInfo['descuento']!,
-          tipoIva: 'G', // Por defecto General
+          tipoIva: 'G',
         ),
       );
 
@@ -127,7 +263,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
     return _calcularBaseImponible() + _calcularTotalIva();
   }
 
-  Future<void> _guardarPedido() async {
+  Future<void> _guardarCambios() async {
     if (_guardando) return;
 
     if (_clienteSeleccionado == null) {
@@ -165,61 +301,53 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
 
       final apiService = VelneoAPIService(url, apiKey);
 
-      final pedidoVelneoData = {
+      // Preparar datos del presupuesto para actualizar en la API
+      final presupuestoData = {
         'cliente_id': _clienteSeleccionado!['id'],
-        'fecha': DateTime.now().toIso8601String(),
+        'comercial_id': comercialId,
         'observaciones': _observacionesController.text,
-        'total': _calcularTotal(),
+        'estado': widget.presupuesto['estado'] ?? 'P',
         'lineas': _lineas
             .map(
               (linea) => {
-                'art': linea.articulo['id'],
-                'can_ped': linea.cantidad,
-                'pre_ven': linea.precio,
-                'por_dto': linea.descuento,
-                'reg_iva_vt_imp_pla': linea.tipoIva, // G/R/S/X para pedidos
+                'articulo_id': linea.articulo['id'],
+                'cantidad': linea.cantidad,
+                'precio': linea.precio,
+                'tipo_iva': linea.tipoIva, // 🔥 AGREGAR TIPO DE IVA
               },
             )
             .toList(),
       };
 
-      if (comercialId != null) {
-        pedidoVelneoData['cmr'] = comercialId;
-      }
-
-      final resultado = await apiService
-          .crearPedido(pedidoVelneoData)
+      // Actualizar en Velneo API
+      await apiService
+          .actualizarPresupuesto(widget.presupuesto['id'], presupuestoData)
           .timeout(
             const Duration(seconds: 45),
-            onTimeout: () => throw Exception(
-              'Timeout: El servidor tardó demasiado en responder',
-            ),
+            onTimeout: () =>
+                throw Exception('Timeout: El servidor tardó demasiado'),
           );
 
-      final pedidoIdVelneo = resultado['id'];
-
-      // Guardar en BD local
+      // Actualizar en BD local
       final db = DatabaseHelper.instance;
-      await db.insertarPedido({
-        'id': pedidoIdVelneo,
+      await db.actualizarPresupuesto(widget.presupuesto['id'], {
         'cliente_id': _clienteSeleccionado!['id'],
-        'cmr': comercialId,
-        'fecha': DateTime.now().toIso8601String(),
         'observaciones': _observacionesController.text,
         'total': _calcularTotal(),
-        'estado': 'Sincronizado',
-        'sincronizado': 1,
+        'sincronizado': 1, // Marcar como sincronizado
       });
 
+      // Actualizar líneas en BD local
+      await db.eliminarLineasPresupuesto(widget.presupuesto['id']);
+
       for (var linea in _lineas) {
-        await db.insertarLineaPedido({
-          'pedido_id': pedidoIdVelneo,
+        await db.insertarLineaPresupuesto({
+          'presupuesto_id': widget.presupuesto['id'],
           'articulo_id': linea.articulo['id'],
           'cantidad': linea.cantidad,
           'precio': linea.precio,
           'por_descuento': linea.descuento,
           'por_iva': linea.porcentajeIva,
-          'tipo_iva': linea.tipoIva,
         });
       }
 
@@ -231,10 +359,12 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Pedido #$pedidoIdVelneo creado correctamente'),
-          backgroundColor: const Color(0xFF032458),
-          duration: const Duration(seconds: 2),
+        const SnackBar(
+          content: Text(
+            '✅ Presupuesto actualizado correctamente en el servidor',
+          ),
+          backgroundColor: Color(0xFF032458),
+          duration: Duration(seconds: 2),
         ),
       );
 
@@ -267,8 +397,16 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Crear Pedido'),
+        title: Text('Editar Presupuesto #${widget.presupuesto['id']}'),
         backgroundColor: const Color(0xFF162846),
+        actions: [
+          // 🔥 BOTÓN DEBUG
+          IconButton(
+            icon: const Icon(Icons.bug_report, color: Colors.orange),
+            onPressed: _debugVerLineas,
+            tooltip: 'Ver estructura de líneas',
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -356,14 +494,6 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                             style: TextStyle(
                               color: Colors.grey[600],
                               fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Toca "Agregar" para añadir productos',
-                            style: TextStyle(
-                              color: Colors.grey[500],
-                              fontSize: 12,
                             ),
                           ),
                         ],
@@ -479,7 +609,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
 
                 const SizedBox(height: 16),
 
-                // Card de totales con desglose
+                // Card de totales
                 Card(
                   margin: const EdgeInsets.symmetric(vertical: 16),
                   color: const Color(0xFF032458).withOpacity(0.05),
@@ -535,34 +665,29 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                 ),
 
                 // Botón guardar
-                ElevatedButton(
-                  onPressed: _guardando ? null : _guardarPedido,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF032458),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: _guardando ? null : _guardarCambios,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF032458),
+                      foregroundColor: Colors.white,
                     ),
-                  ),
-                  child: _guardando
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Colors.white,
+                    child: _guardando
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
                             ),
+                          )
+                        : const Text(
+                            'Guardar Cambios',
+                            style: TextStyle(fontSize: 16),
                           ),
-                        )
-                      : const Text(
-                          'GUARDAR PEDIDO',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                  ),
                 ),
               ],
             ),

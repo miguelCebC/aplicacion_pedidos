@@ -366,6 +366,412 @@ class VelneoAPIService {
     }
   }
 
+  // Actualizar pedido existente (POST con ID)
+  // Actualizar pedido existente (POST con ID)
+  // Actualizar pedido existente (POST con ID)
+  // Actualizar pedido existente
+  Future<Map<String, dynamic>> actualizarPedido(
+    int pedidoId,
+    Map<String, dynamic> pedido,
+  ) async {
+    try {
+      final pedidoVelneo = {
+        'emp': '1',
+        'emp_div': '1',
+        'clt': pedido['cliente_id'],
+      };
+
+      if (pedido['cmr'] != null) {
+        pedidoVelneo['cmr'] = pedido['cmr'];
+      }
+
+      if (pedido['observaciones'] != null) {
+        pedidoVelneo['obs'] = pedido['observaciones'];
+      }
+
+      print('📝 Actualizando pedido #$pedidoId en Velneo');
+
+      final httpClient = HttpClient()
+        ..badCertificateCallback =
+            ((X509Certificate cert, String host, int port) => true)
+        ..connectionTimeout = const Duration(seconds: 30);
+
+      try {
+        // PASO 1: Obtener líneas actuales del servidor
+        print('📋 PASO 1: Obteniendo líneas actuales del servidor');
+        final lineasActuales = await obtenerLineasPedido(pedidoId);
+        print('   Encontradas ${lineasActuales.length} líneas en servidor');
+
+        // PASO 2: Eliminar TODAS las líneas antiguas usando sus IDs
+        print(
+          '🗑️ PASO 2: Eliminando ${lineasActuales.length} líneas antiguas',
+        );
+        for (var linea in lineasActuales) {
+          try {
+            final lineaId = linea['id'];
+            if (lineaId != null) {
+              final request = await httpClient.deleteUrl(
+                Uri.parse(_buildUrl('/VTA_PED_LIN_G/$lineaId')),
+              );
+              request.headers.set('Accept', 'application/json');
+              final response = await request.close();
+
+              if (response.statusCode == 200 || response.statusCode == 204) {
+                print('   ✓ Línea $lineaId eliminada');
+              } else {
+                print(
+                  '   ⚠️ Error eliminando línea $lineaId: ${response.statusCode}',
+                );
+              }
+              await Future.delayed(const Duration(milliseconds: 50));
+            }
+          } catch (e) {
+            print('   ⚠️ Error eliminando línea: $e');
+          }
+        }
+
+        // Esperar que se completen las eliminaciones
+        await Future.delayed(const Duration(milliseconds: 500));
+        print('   ✅ Eliminación completada');
+
+        // PASO 3: Actualizar datos del pedido
+        print('📝 PASO 3: Actualizando datos del pedido');
+        final request = await httpClient
+            .postUrl(Uri.parse(_buildUrl('/VTA_PED_G/$pedidoId')))
+            .timeout(const Duration(seconds: 30));
+
+        request.headers.set('Content-Type', 'application/json');
+        request.headers.set('Accept', 'application/json');
+        request.headers.set('User-Agent', 'Flutter App');
+        request.write(json.encode(pedidoVelneo));
+
+        final response = await request.close().timeout(
+          const Duration(seconds: 30),
+        );
+        final stringData = await response
+            .transform(utf8.decoder)
+            .join()
+            .timeout(const Duration(seconds: 10));
+
+        print(
+          '📥 Respuesta actualizar pedido - Status: ${response.statusCode}',
+        );
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          print('   ✅ Pedido actualizado');
+
+          // Esperar antes de crear nuevas líneas
+          await Future.delayed(const Duration(milliseconds: 500));
+
+          // PASO 4: Crear TODAS las líneas nuevas
+          int lineasOk = 0;
+          if (pedido['lineas'] != null) {
+            print(
+              '📝 PASO 4: Creando ${pedido['lineas'].length} líneas nuevas',
+            );
+            for (var linea in pedido['lineas']) {
+              try {
+                final lineaConIva = {
+                  'articulo_id': linea['articulo_id'],
+                  'cantidad': linea['cantidad'],
+                  'precio': linea['precio'],
+                  'reg_iva_vt_imp_pla': linea['tipo_iva'] ?? 'G',
+                };
+                await crearLineaPedido(pedidoId, lineaConIva);
+                lineasOk++;
+                print('   ✓ Línea $lineasOk/${pedido['lineas'].length} creada');
+                await Future.delayed(const Duration(milliseconds: 100));
+              } catch (e) {
+                print('   ⚠️ Error creando línea: $e');
+              }
+            }
+          }
+
+          print('✅ COMPLETADO: $lineasOk líneas creadas');
+
+          return {'id': pedidoId, 'lineas_creadas': lineasOk, 'success': true};
+        }
+
+        throw Exception('Error HTTP ${response.statusCode}: $stringData');
+      } finally {
+        httpClient.close();
+      }
+    } catch (e) {
+      print('❌ Error en actualizarPedido: $e');
+      rethrow;
+    }
+  }
+
+  // Actualizar presupuesto existente
+  Future<Map<String, dynamic>> actualizarPresupuesto(
+    int presupuestoId,
+    Map<String, dynamic> presupuesto,
+  ) async {
+    try {
+      final presupuestoVelneo = {
+        'emp': '1',
+        'emp_div': '1',
+        'clt': presupuesto['cliente_id'],
+      };
+
+      if (presupuesto['comercial_id'] != null) {
+        presupuestoVelneo['cmr'] = presupuesto['comercial_id'];
+      }
+
+      if (presupuesto['observaciones'] != null) {
+        presupuestoVelneo['obs'] = presupuesto['observaciones'];
+      }
+
+      if (presupuesto['estado'] != null) {
+        presupuestoVelneo['est'] = presupuesto['estado'];
+      }
+
+      print('📝 Actualizando presupuesto #$presupuestoId en Velneo');
+
+      final httpClient = HttpClient()
+        ..badCertificateCallback =
+            ((X509Certificate cert, String host, int port) => true)
+        ..connectionTimeout = const Duration(seconds: 30);
+
+      try {
+        // PASO 1: Obtener líneas actuales del servidor
+        print('📋 PASO 1: Obteniendo líneas actuales del servidor');
+        final lineasActuales = await obtenerLineasPresupuesto(presupuestoId);
+        print('   Encontradas ${lineasActuales.length} líneas en servidor');
+
+        // PASO 2: Eliminar TODAS las líneas antiguas usando sus IDs
+        print(
+          '🗑️ PASO 2: Eliminando ${lineasActuales.length} líneas antiguas',
+        );
+        for (var linea in lineasActuales) {
+          try {
+            final lineaId = linea['id'];
+            if (lineaId != null) {
+              final request = await httpClient.deleteUrl(
+                Uri.parse(_buildUrl('/VTA_PRE_LIN_G/$lineaId')),
+              );
+              request.headers.set('Accept', 'application/json');
+              final response = await request.close();
+
+              if (response.statusCode == 200 || response.statusCode == 204) {
+                print('   ✓ Línea $lineaId eliminada');
+              } else {
+                print(
+                  '   ⚠️ Error eliminando línea $lineaId: ${response.statusCode}',
+                );
+              }
+              await Future.delayed(const Duration(milliseconds: 50));
+            }
+          } catch (e) {
+            print('   ⚠️ Error eliminando línea: $e');
+          }
+        }
+
+        // Esperar que se completen las eliminaciones
+        await Future.delayed(const Duration(milliseconds: 500));
+        print('   ✅ Eliminación completada');
+
+        // PASO 3: Actualizar datos del presupuesto
+        print('📝 PASO 3: Actualizando datos del presupuesto');
+        final request = await httpClient
+            .postUrl(Uri.parse(_buildUrl('/VTA_PRE_G/$presupuestoId')))
+            .timeout(const Duration(seconds: 30));
+
+        request.headers.set('Content-Type', 'application/json');
+        request.headers.set('Accept', 'application/json');
+        request.headers.set('User-Agent', 'Flutter App');
+        request.write(json.encode(presupuestoVelneo));
+
+        final response = await request.close().timeout(
+          const Duration(seconds: 30),
+        );
+        final stringData = await response
+            .transform(utf8.decoder)
+            .join()
+            .timeout(const Duration(seconds: 10));
+
+        print(
+          '📥 Respuesta actualizar presupuesto - Status: ${response.statusCode}',
+        );
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          print('   ✅ Presupuesto actualizado');
+
+          // Esperar antes de crear nuevas líneas
+          await Future.delayed(const Duration(milliseconds: 500));
+
+          // PASO 4: Crear TODAS las líneas nuevas
+          int lineasOk = 0;
+          if (presupuesto['lineas'] != null) {
+            print(
+              '📝 PASO 4: Creando ${presupuesto['lineas'].length} líneas nuevas',
+            );
+            for (var linea in presupuesto['lineas']) {
+              try {
+                final lineaData = {
+                  'vta_pre': presupuestoId,
+                  'art': linea['articulo_id'],
+                  'can': linea['cantidad'],
+                  'pre': linea['precio'],
+                  'reg_iva_vta': linea['tipo_iva'] ?? 'G',
+                };
+
+                final lineaRequest = await httpClient
+                    .postUrl(Uri.parse(_buildUrl('/VTA_PRE_LIN_G')))
+                    .timeout(const Duration(seconds: 30));
+
+                lineaRequest.headers.set('Content-Type', 'application/json');
+                lineaRequest.headers.set('Accept', 'application/json');
+                lineaRequest.write(json.encode(lineaData));
+
+                final lineaResponse = await lineaRequest.close();
+                if (lineaResponse.statusCode == 200 ||
+                    lineaResponse.statusCode == 201) {
+                  lineasOk++;
+                  print(
+                    '   ✓ Línea $lineasOk/${presupuesto['lineas'].length} creada',
+                  );
+                }
+                await Future.delayed(const Duration(milliseconds: 100));
+              } catch (e) {
+                print('   ⚠️ Error creando línea: $e');
+              }
+            }
+          }
+
+          print('✅ COMPLETADO: $lineasOk líneas creadas');
+
+          return {
+            'id': presupuestoId,
+            'lineas_creadas': lineasOk,
+            'success': true,
+          };
+        }
+
+        throw Exception('Error HTTP ${response.statusCode}: $stringData');
+      } finally {
+        httpClient.close();
+      }
+    } catch (e) {
+      print('❌ Error en actualizarPresupuesto: $e');
+      rethrow;
+    }
+  }
+
+  // Eliminar líneas de pedido (DELETE) - SIN CAMBIOS
+  Future<void> eliminarLineasPedido(int pedidoId) async {
+    try {
+      print('🗑️ Obteniendo líneas del pedido #$pedidoId para eliminar');
+
+      final lineas = await obtenerLineasPedido(pedidoId);
+      print('📋 Encontradas ${lineas.length} líneas a eliminar');
+
+      if (lineas.isEmpty) {
+        print('✓ No hay líneas que eliminar');
+        return;
+      }
+
+      final httpClient = HttpClient()
+        ..badCertificateCallback =
+            ((X509Certificate cert, String host, int port) => true);
+
+      try {
+        int eliminadas = 0;
+        for (var linea in lineas) {
+          try {
+            final lineaId = linea['id'];
+            if (lineaId == null) continue;
+
+            final request = await httpClient.deleteUrl(
+              Uri.parse(_buildUrl('/VTA_PED_LIN_G/$lineaId')),
+            );
+            request.headers.set('Accept', 'application/json');
+            final response = await request.close();
+
+            if (response.statusCode == 200 || response.statusCode == 204) {
+              eliminadas++;
+              print(
+                '  ✓ Línea $lineaId eliminada ($eliminadas/${lineas.length})',
+              );
+            } else {
+              print(
+                '  ⚠️ Error eliminando línea $lineaId: ${response.statusCode}',
+              );
+            }
+
+            // 🔥 PEQUEÑO DELAY ENTRE ELIMINACIONES
+            await Future.delayed(const Duration(milliseconds: 50));
+          } catch (e) {
+            print('  ⚠️ Error eliminando línea: $e');
+          }
+        }
+        print('✅ Total líneas eliminadas: $eliminadas/${lineas.length}');
+      } finally {
+        httpClient.close();
+      }
+    } catch (e) {
+      print('⚠️ Error eliminando líneas: $e');
+    }
+  }
+
+  // Eliminar líneas de presupuesto (DELETE) - SIN CAMBIOS
+  Future<void> eliminarLineasPresupuesto(int presupuestoId) async {
+    try {
+      print(
+        '🗑️ Obteniendo líneas del presupuesto #$presupuestoId para eliminar',
+      );
+
+      final lineas = await obtenerLineasPresupuesto(presupuestoId);
+      print('📋 Encontradas ${lineas.length} líneas a eliminar');
+
+      if (lineas.isEmpty) {
+        print('✓ No hay líneas que eliminar');
+        return;
+      }
+
+      final httpClient = HttpClient()
+        ..badCertificateCallback =
+            ((X509Certificate cert, String host, int port) => true);
+
+      try {
+        int eliminadas = 0;
+        for (var linea in lineas) {
+          try {
+            final lineaId = linea['id'];
+            if (lineaId == null) continue;
+
+            final request = await httpClient.deleteUrl(
+              Uri.parse(_buildUrl('/VTA_PRE_LIN_G/$lineaId')),
+            );
+            request.headers.set('Accept', 'application/json');
+            final response = await request.close();
+
+            if (response.statusCode == 200 || response.statusCode == 204) {
+              eliminadas++;
+              print(
+                '  ✓ Línea $lineaId eliminada ($eliminadas/${lineas.length})',
+              );
+            } else {
+              print(
+                '  ⚠️ Error eliminando línea $lineaId: ${response.statusCode}',
+              );
+            }
+
+            // 🔥 PEQUEÑO DELAY ENTRE ELIMINACIONES
+            await Future.delayed(const Duration(milliseconds: 50));
+          } catch (e) {
+            print('  ⚠️ Error eliminando línea: $e');
+          }
+        }
+        print('✅ Total líneas eliminadas: $eliminadas/${lineas.length}');
+      } finally {
+        httpClient.close();
+      }
+    } catch (e) {
+      print('⚠️ Error eliminando líneas: $e');
+    }
+  }
+
   Future<List<dynamic>> obtenerPresupuestos([int? comercialId]) async {
     try {
       final allPresupuestos = <dynamic>[];
@@ -418,10 +824,12 @@ class VelneoAPIService {
                 return {
                   'id': presupuesto['id'],
                   'cliente_id': presupuesto['clt'] ?? 0,
-                  'comercial_id': presupuesto['cmr'] ?? 0,
+                  'comercial_id':
+                      presupuesto['cmr'] ??
+                      0, // 👈 CAMBIAR 'comercial_id' por 'cmr'
                   'fecha':
                       presupuesto['fch'] ?? DateTime.now().toIso8601String(),
-                  'numero': presupuesto['num'] ?? '',
+                  'numero': presupuesto['num_pre'] ?? '',
                   'estado': presupuesto['est'] ?? '',
                   'observaciones': presupuesto['obs'] ?? '',
                   'total': _convertirADouble(presupuesto['tot']),
@@ -516,6 +924,7 @@ class VelneoAPIService {
                   'precio': _convertirADouble(linea['pre']),
                   'por_descuento': _convertirADouble(linea['por_dto']),
                   'por_iva': _convertirADouble(linea['por_iva_apl']),
+                  'tipo_iva': linea['tip_iva'] ?? 'G',
                 };
               }).toList();
 
@@ -607,6 +1016,8 @@ class VelneoAPIService {
                   'articulo_id': linea['art'] ?? 0,
                   'cantidad': _convertirADouble(linea['can']),
                   'precio': _convertirADouble(linea['pre']),
+                  'por_iva': _convertirADouble(linea['iva_pje']),
+                  'tipo_iva': linea['reg_iva_vta'] ?? 'G',
                 };
               }).toList();
 
@@ -1186,13 +1597,16 @@ class VelneoAPIService {
         if (data['vta_ped_lin_g'] != null && data['vta_ped_lin_g'] is List) {
           final lineasList = (data['vta_ped_lin_g'] as List).map((linea) {
             _log(
-              '  → Línea: Art ${linea['art']} - Cant: ${linea['can_ped']} - Precio: ${linea['pre']}',
+              '  → Línea ID: ${linea['id']} - Art ${linea['art']} - Cant: ${linea['can_ped']} - Precio: ${linea['pre']}',
             );
             return {
+              'id': linea['id'], // 🔥 ID DEL SERVIDOR
               'pedido_id': linea['vta_ped'] ?? pedidoId,
               'articulo_id': linea['art'] ?? 0,
               'cantidad': _convertirADouble(linea['can_ped']),
               'precio': _convertirADouble(linea['pre']),
+              'por_descuento': _convertirADouble(linea['por_dto'] ?? 0),
+              'por_iva': _convertirADouble(linea['por_iva'] ?? 0),
             };
           }).toList();
 
@@ -1236,13 +1650,16 @@ class VelneoAPIService {
         if (data['vta_pre_lin_g'] != null && data['vta_pre_lin_g'] is List) {
           final lineasList = (data['vta_pre_lin_g'] as List).map((linea) {
             _log(
-              '  → Línea: Art ${linea['art']} - Cant: ${linea['can']} - Precio: ${linea['pre']}',
+              '  → Línea ID: ${linea['id']} - Art ${linea['art']} - Cant: ${linea['can']} - Precio: ${linea['pre']}',
             );
             return {
+              'id': linea['id'], // 🔥 ID DEL SERVIDOR
               'presupuesto_id': linea['vta_pre'] ?? presupuestoId,
               'articulo_id': linea['art'] ?? 0,
               'cantidad': _convertirADouble(linea['can']),
               'precio': _convertirADouble(linea['pre']),
+              'por_descuento': _convertirADouble(linea['por_dto'] ?? 0),
+              'por_iva': _convertirADouble(linea['por_iva'] ?? 0),
             };
           }).toList();
 
@@ -2780,11 +3197,37 @@ class VelneoAPIService {
 
                 String? limpiarHora(dynamic hora) {
                   if (hora == null) return null;
-                  final str = hora.toString().trim();
-                  if (str.isEmpty) return null;
-                  if (RegExp(r'^\d{2}:\d{2}$').hasMatch(str)) return str;
-                  if (RegExp(r'^\d{2}:\d{2}:\d{2}').hasMatch(str))
-                    return str.substring(0, 5);
+
+                  String horaStr = hora.toString().trim();
+                  if (horaStr.isEmpty) return null;
+
+                  print('🕐 limpiarHora RAW: "$horaStr"');
+
+                  // Si viene en formato GMT: "Mon Nov 17 09:00:00 2025 GMT"
+                  if (horaStr.contains('GMT')) {
+                    try {
+                      // Extraer la hora usando regex
+                      final regex = RegExp(r'\d{2}:\d{2}:\d{2}');
+                      final match = regex.firstMatch(horaStr);
+
+                      if (match != null) {
+                        final horaExtraida = match.group(0)!;
+                        print('✅ Hora extraída de GMT: "$horaExtraida"');
+                        return horaExtraida;
+                      }
+                    } catch (e) {
+                      print('❌ Error parseando hora GMT: $horaStr - $e');
+                    }
+                  }
+
+                  // Si ya viene en formato "HH:MM:SS" directo
+                  if (horaStr.contains(':')) {
+                    final resultado = horaStr.split('.').first;
+                    print('✅ Hora formato directo: "$resultado"');
+                    return resultado;
+                  }
+
+                  print('⚠️ No se pudo extraer hora de: "$horaStr"');
                   return null;
                 }
 

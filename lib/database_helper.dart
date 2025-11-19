@@ -188,6 +188,7 @@ class DatabaseHelper {
         precio REAL NOT NULL,
         por_descuento REAL DEFAULT 0,
         por_iva REAL DEFAULT 0,
+        tipo_iva TEXT DEFAULT 'G',
         FOREIGN KEY (pedido_id) REFERENCES pedidos (id),
         FOREIGN KEY (articulo_id) REFERENCES articulos (id)
       )
@@ -222,6 +223,7 @@ class DatabaseHelper {
     precio REAL NOT NULL,
     por_descuento REAL DEFAULT 0,
     por_iva REAL DEFAULT 0,
+    tipo_iva TEXT DEFAULT 'G',
     FOREIGN KEY (presupuesto_id) REFERENCES presupuestos (id),
     FOREIGN KEY (articulo_id) REFERENCES articulos (id)
   )
@@ -1192,6 +1194,51 @@ class DatabaseHelper {
     }
 
     await batch.commit(noResult: true);
+  }
+
+  // Actualizar pedido
+  Future<int> actualizarPedido(int pedidoId, Map<String, dynamic> datos) async {
+    final db = await database;
+    return await db.update(
+      'pedidos',
+      datos,
+      where: 'id = ?',
+      whereArgs: [pedidoId],
+    );
+  }
+
+  // Eliminar líneas de pedido
+  Future<int> eliminarLineasPedido(int pedidoId) async {
+    final db = await database;
+    return await db.delete(
+      'lineas_pedido',
+      where: 'pedido_id = ?',
+      whereArgs: [pedidoId],
+    );
+  }
+
+  // Actualizar presupuesto
+  Future<int> actualizarPresupuesto(
+    int presupuestoId,
+    Map<String, dynamic> datos,
+  ) async {
+    final db = await database;
+    return await db.update(
+      'presupuestos',
+      datos,
+      where: 'id = ?',
+      whereArgs: [presupuestoId],
+    );
+  }
+
+  // Eliminar líneas de presupuesto
+  Future<int> eliminarLineasPresupuesto(int presupuestoId) async {
+    final db = await database;
+    return await db.delete(
+      'lineas_presupuesto',
+      where: 'presupuesto_id = ?',
+      whereArgs: [presupuestoId],
+    );
   }
 
   Future<void> limpiarBaseDatos() async {

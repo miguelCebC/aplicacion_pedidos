@@ -25,11 +25,17 @@ class LineaDetalle {
   final String articuloCodigo;
   final double cantidad;
   final double precio;
+  final double porDescuento;
+  final double porIva;
+  final String tipoIva;
 
   LineaDetalle({
     required this.articuloNombre,
     required this.articuloCodigo,
     required this.cantidad,
     required this.precio,
+    this.porDescuento = 0.0,
+    this.porIva = 0.0,
+    this.tipoIva = 'G',
   });
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import 'crear_editar_lead_screen.dart';
+import '../services/api_service.dart';
 
 class LeadsScreen extends StatefulWidget {
   const LeadsScreen({super.key});
@@ -19,6 +20,7 @@ class _LeadsScreenState extends State<LeadsScreen> {
   int? _comercialId;
   String _comercialNombre = 'Sin comercial';
   final TextEditingController _searchController = TextEditingController();
+  bool _sincronizando = false;
 
   @override
   void initState() {
@@ -36,37 +38,42 @@ class _LeadsScreenState extends State<LeadsScreen> {
   Future<void> _cargarDatos() async {
     setState(() => _isLoading = true);
 
-    final prefs = await SharedPreferences.getInstance();
-    final comercialId = prefs.getInt('comercial_id');
-    final comercialNombre =
-        prefs.getString('comercial_nombre') ?? 'Sin comercial';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final comercialId = prefs.getInt('comercial_id');
+      final comercialNombre =
+          prefs.getString('comercial_nombre') ?? 'Sin comercial';
 
-    final db = DatabaseHelper.instance;
+      final db = DatabaseHelper.instance;
 
-    // Cargar leads del comercial
-    final leads = await db.obtenerLeads(comercialId);
+      // Cargar leads del comercial
+      final leads = await db.obtenerLeads(comercialId);
 
-    // Cargar clientes para mostrar nombres
-    final clientes = await db.obtenerClientes();
-    _clientesNombres.clear();
-    for (var cliente in clientes) {
-      _clientesNombres[cliente['id'] as int] = cliente['nombre'] as String;
+      // Cargar clientes para mostrar nombres
+      final clientes = await db.obtenerClientes();
+      _clientesNombres.clear();
+      for (var cliente in clientes) {
+        _clientesNombres[cliente['id'] as int] = cliente['nombre'] as String;
+      }
+
+      // Cargar campañas para mostrar nombres
+      final campanas = await db.obtenerCampanas();
+      _campanasNombres.clear();
+      for (var campana in campanas) {
+        _campanasNombres[campana['id'] as int] = campana['nombre'] as String;
+      }
+
+      setState(() {
+        _comercialId = comercialId;
+        _comercialNombre = comercialNombre;
+        _leads = leads;
+        _leadsFiltrados = leads;
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error al cargar leads: $e');
+      setState(() => _isLoading = false);
     }
-
-    // Cargar campañas para mostrar nombres
-    final campanas = await db.obtenerCampanas();
-    _campanasNombres.clear();
-    for (var campana in campanas) {
-      _campanasNombres[campana['id'] as int] = campana['nombre'] as String;
-    }
-
-    setState(() {
-      _comercialId = comercialId;
-      _comercialNombre = comercialNombre;
-      _leads = leads;
-      _leadsFiltrados = leads;
-      _isLoading = false;
-    });
   }
 
   void _filtrarLeads() {
@@ -320,26 +327,28 @@ class _LeadsScreenState extends State<LeadsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Leads'),
-            Text(_comercialNombre, style: const TextStyle(fontSize: 12)),
-          ],
-        ),
-        backgroundColor: const Color(0xFF162846),
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
+      body: Column(
+        children: [
+          // Barra de búsqueda con botón de sincronización
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
               children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
+                Expanded(
                   child: TextField(
                     controller: _searchController,
                     decoration: InputDecoration(
-                      hintText: 'Buscar leads por asunto, estado o cliente...',
+                      hintText: 'Buscar leads...',
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
@@ -354,189 +363,172 @@ class _LeadsScreenState extends State<LeadsScreen> {
                       ),
                       filled: true,
                       fillColor: Colors.grey[100],
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.list_alt, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${_leadsFiltrados.length} lead(s) encontrado(s)',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
+                const SizedBox(width: 12),
+                // Botón de sincronización
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF032458),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: _sincronizando
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.sync, color: Colors.white),
+                    onPressed: _sincronizando ? null : _sincronizarLeads,
+                    tooltip: 'Sincronizar leads',
                   ),
                 ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: _leadsFiltrados.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                _searchController.text.isEmpty
-                                    ? Icons.inbox
-                                    : Icons.search_off,
-                                size: 64,
-                                color: Colors.grey,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                _searchController.text.isEmpty
-                                    ? 'No hay leads disponibles'
-                                    : 'No se encontraron leads',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                            ],
+              ],
+            ),
+          ),
+          // Lista de leads
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _leadsFiltrados.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _searchController.text.isEmpty
+                              ? Icons.people_outline
+                              : Icons.search_off,
+                          size: 64,
+                          color: Colors.grey,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          _searchController.text.isEmpty
+                              ? 'No hay leads'
+                              : 'No se encontraron resultados',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey,
                           ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _leadsFiltrados.length,
-                          itemBuilder: (context, index) {
-                            final lead = _leadsFiltrados[index];
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              elevation: 2,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: InkWell(
-                                onTap: () => _mostrarDetalleLead(lead),
-                                borderRadius: BorderRadius.circular(12),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(8),
+                    itemCount: _leadsFiltrados.length,
+                    itemBuilder: (context, index) {
+                      final lead = _leadsFiltrados[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: InkWell(
+                          onTap: () => _mostrarDetalleLead(lead),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 56,
+                                  height: 56,
+                                  decoration: BoxDecoration(
+                                    color: _getColorEstado(
+                                      lead['estado'],
+                                    ).withOpacity(0.1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    _getIconoEstado(lead['estado']),
+                                    color: _getColorEstado(lead['estado']),
+                                    size: 28,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
+                                      Text(
+                                        lead['asunto'] ?? 'Sin asunto',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _obtenerNombreCliente(
+                                          lead['cliente_id'],
+                                        ),
+                                        style: TextStyle(
+                                          color: Colors.grey[700],
+                                          fontSize: 14,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
                                       Row(
                                         children: [
                                           Container(
-                                            padding: const EdgeInsets.all(8),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
                                             decoration: BoxDecoration(
                                               color: _getColorEstado(
                                                 lead['estado'],
-                                              ).withOpacity(0.1),
+                                              ).withOpacity(0.15),
                                               borderRadius:
                                                   BorderRadius.circular(8),
                                             ),
-                                            child: Icon(
-                                              _getIconoEstado(lead['estado']),
-                                              color: _getColorEstado(
-                                                lead['estado'],
-                                              ),
-                                              size: 24,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  lead['asunto'] ??
-                                                      'Sin asunto',
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                  maxLines: 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  _obtenerNombreCliente(
-                                                    lead['cliente_id'],
-                                                  ),
-                                                  style: TextStyle(
-                                                    fontSize: 14,
-                                                    color: Colors.grey[600],
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: _getColorEstado(
-                                                lead['estado'],
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                            ),
                                             child: Text(
-                                              lead['estado'] ?? 'Sin estado',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.calendar_today,
-                                            size: 14,
-                                            color: Colors.grey[600],
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            _formatearFecha(lead['fecha']),
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey[600],
-                                            ),
-                                          ),
-                                          const SizedBox(width: 16),
-                                          if (lead['agendado'] == 1) ...[
-                                            Icon(
-                                              Icons.event_note,
-                                              size: 14,
-                                              color: Colors.green[600],
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              'Agendado',
+                                              _getNombreEstado(lead['estado']),
                                               style: TextStyle(
+                                                color: _getColorEstado(
+                                                  lead['estado'],
+                                                ),
                                                 fontSize: 12,
-                                                color: Colors.green[600],
-                                                fontWeight: FontWeight.w500,
+                                                fontWeight: FontWeight.w600,
                                               ),
                                             ),
-                                          ],
+                                          ),
                                         ],
                                       ),
                                     ],
                                   ),
                                 ),
-                              ),
-                            );
-                          },
+                                Icon(
+                                  Icons.chevron_right,
+                                  color: Colors.grey[400],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                ),
-              ],
-            ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           final resultado = await Navigator.push(
@@ -554,5 +546,54 @@ class _LeadsScreenState extends State<LeadsScreen> {
         label: const Text('Nuevo Lead'),
       ),
     );
+  }
+
+  Future<void> _sincronizarLeads() async {
+    setState(() => _sincronizando = true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      String url = prefs.getString('velneo_url') ?? '';
+      final String apiKey = prefs.getString('velneo_api_key') ?? '';
+
+      if (url.isEmpty || apiKey.isEmpty) {
+        throw Exception('Configura la URL y API Key en Configuración');
+      }
+
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://$url';
+      }
+
+      final apiService = VelneoAPIService(url, apiKey);
+      final db = DatabaseHelper.instance;
+
+      // Descargar TODOS los leads (sin filtro de comercial)
+      final leadsLista = await apiService.obtenerLeads();
+      await db.limpiarLeads();
+      await db.insertarLeadsLote(leadsLista.cast<Map<String, dynamic>>());
+
+      setState(() => _sincronizando = false);
+      await _cargarDatos();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ ${leadsLista.length} leads sincronizados'),
+          backgroundColor: const Color(0xFF032458),
+        ),
+      );
+    } catch (e) {
+      setState(() => _sincronizando = false);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString().replaceAll('Exception: ', '')}'),
+          backgroundColor: const Color(0xFFF44336),
+        ),
+      );
+    }
   }
 }

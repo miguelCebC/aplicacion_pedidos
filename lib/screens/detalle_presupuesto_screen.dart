@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../database_helper.dart';
+import 'editar_presupuesto_screen.dart';
 
 class DetallePresupuestoScreen extends StatefulWidget {
   final Map<String, dynamic> presupuesto;
@@ -56,6 +57,8 @@ class _DetallePresupuestoScreenState extends State<DetallePresupuestoScreen> {
         'articulo_codigo': articulo['codigo'],
         'cantidad': linea['cantidad'],
         'precio': linea['precio'],
+        'por_descuento': linea['por_descuento'] ?? 0.0,
+        'por_iva': linea['por_iva'] ?? 0.0,
       });
     }
 
@@ -76,24 +79,89 @@ class _DetallePresupuestoScreenState extends State<DetallePresupuestoScreen> {
     }
   }
 
+  String _getNombreEstado(String? estado) {
+    switch (estado?.toUpperCase()) {
+      case 'A':
+        return 'Aceptado';
+      case 'P':
+        return 'Pendiente';
+      case 'R':
+        return 'Rechazado';
+      default:
+        return 'Desconocido';
+    }
+  }
+
+  double _calcularSubtotalLinea(Map<String, dynamic> linea) {
+    final cantidad = (linea['cantidad'] as num?)?.toDouble() ?? 0.0;
+    final precio = (linea['precio'] as num?)?.toDouble() ?? 0.0;
+    return cantidad * precio;
+  }
+
+  double _calcularTotalLinea(Map<String, dynamic> linea) {
+    final subtotal = _calcularSubtotalLinea(linea);
+    final descuento = (linea['por_descuento'] as num?)?.toDouble() ?? 0.0;
+    final porIva = (linea['por_iva'] as num?)?.toDouble() ?? 0.0;
+
+    final baseLinea = subtotal - (subtotal * descuento / 100);
+    final ivaLinea = baseLinea * porIva / 100;
+
+    return baseLinea + ivaLinea;
+  }
+
+  double _calcularTotalPresupuesto() {
+    return _lineas.fold(0.0, (sum, linea) => sum + _calcularTotalLinea(linea));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.presupuesto['numero'] ??
-              'Presupuesto #${widget.presupuesto['id']}',
+          widget.presupuesto['numero']?.toString().isNotEmpty == true
+              ? widget.presupuesto['numero']
+              : 'Presupuesto #${widget.presupuesto['id']}',
         ),
         backgroundColor: const Color(0xFF162846),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () async {
+              final resultado = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      EditarPresupuestoScreen(presupuesto: widget.presupuesto),
+                ),
+              );
+              if (resultado == true) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Presupuesto actualizado. Cierra y vuelve a abrir para ver los cambios.',
+                    ),
+                    backgroundColor: Color(0xFF032458),
+                  ),
+                );
+                // Volver a la lista de presupuestos
+                Navigator.pop(context, true);
+              }
+            },
+            tooltip: 'Editar presupuesto',
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              // ... resto del código sin cambios
+              padding: const EdgeInsets.all(16.0),
               children: [
+                // Información del presupuesto
                 Card(
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(16.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -102,24 +170,20 @@ class _DetallePresupuestoScreenState extends State<DetallePresupuestoScreen> {
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
+                            color: Color(0xFF032458),
                           ),
                         ),
-                        const Divider(height: 24),
-                        _buildInfoRow(
-                          'Cliente',
-                          _cliente?['nombre'] ?? 'Desconocido',
-                        ),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        _buildInfoRow('Cliente', _cliente?['nombre'] ?? 'N/A'),
                         _buildInfoRow(
                           'Fecha',
                           _formatearFecha(widget.presupuesto['fecha']),
                         ),
-                        if (widget.presupuesto['fecha_validez'] != null)
-                          _buildInfoRow(
-                            'Validez',
-                            _formatearFecha(
-                              widget.presupuesto['fecha_validez'],
-                            ),
-                          ),
+                        _buildInfoRow(
+                          'Estado',
+                          _getNombreEstado(widget.presupuesto['estado']),
+                        ),
                         if (widget.presupuesto['observaciones'] != null &&
                             widget.presupuesto['observaciones']
                                 .toString()
@@ -133,80 +197,126 @@ class _DetallePresupuestoScreenState extends State<DetallePresupuestoScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+
+                // Líneas del presupuesto
                 const Text(
                   'Líneas del Presupuesto',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF032458),
+                  ),
                 ),
                 const SizedBox(height: 8),
-                ..._lineas.map((linea) {
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      leading: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF032458).withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
+
+                if (_lineas.isEmpty)
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(32.0),
+                      child: Center(
+                        child: Text(
+                          'No hay líneas en este presupuesto',
+                          style: TextStyle(color: Colors.grey),
                         ),
-                        child: const Icon(
-                          Icons.inventory_2,
-                          color: Color(0xFF032458),
-                        ),
-                      ),
-                      title: Text(
-                        linea['articulo_nombre'],
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text('Código: ${linea['articulo_codigo']}'),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            '${linea['cantidad']} x ${linea['precio'].toStringAsFixed(2)}€',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          Text(
-                            '${(linea['cantidad'] * linea['precio']).toStringAsFixed(2)}€',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF032458),
-                            ),
-                          ),
-                        ],
                       ),
                     ),
-                  );
-                }),
+                  )
+                else
+                  ..._lineas.map((linea) {
+                    final subtotal = _calcularSubtotalLinea(linea);
+                    final descuento =
+                        (linea['por_descuento'] as num?)?.toDouble() ?? 0.0;
+                    final totalLinea = _calcularTotalLinea(linea);
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              linea['articulo_nombre'],
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Código: ${linea['articulo_codigo']}',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Cantidad: ${linea['cantidad']}'),
+                                Text(
+                                  'Precio: ${linea['precio'].toStringAsFixed(2)}€',
+                                ),
+                              ],
+                            ),
+                            if (descuento > 0) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Descuento: ${descuento.toStringAsFixed(2)}%',
+                                style: TextStyle(
+                                  color: Colors.orange[700],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                            const Divider(),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                Text(
+                                  'Total: ${totalLinea.toStringAsFixed(2)}€',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: Color(0xFF032458),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+
                 const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF032458),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'TOTAL',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+
+                // Card con el total del presupuesto
+                Card(
+                  color: const Color(0xFF032458).withOpacity(0.05),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'TOTAL PRESUPUESTO:',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
-                      Text(
-                        '${(widget.presupuesto['total'] ?? 0).toStringAsFixed(2)} €',
-                        style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                        Text(
+                          '${_calcularTotalPresupuesto().toStringAsFixed(2)}€',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF032458),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -216,7 +326,7 @@ class _DetallePresupuestoScreenState extends State<DetallePresupuestoScreen> {
 
   Widget _buildInfoRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -224,13 +334,10 @@ class _DetallePresupuestoScreenState extends State<DetallePresupuestoScreen> {
             width: 120,
             child: Text(
               '$label:',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
-          Expanded(child: Text(value, style: const TextStyle(fontSize: 16))),
+          Expanded(child: Text(value)),
         ],
       ),
     );

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import '../services/api_service.dart';
-import 'crear_presupuesto_screen.dart';
 import 'detalle_presupuesto_screen.dart';
+import 'crear_presupuesto_screen.dart';
 
 class PresupuestosScreen extends StatefulWidget {
   const PresupuestosScreen({super.key});
@@ -15,9 +15,11 @@ class PresupuestosScreen extends StatefulWidget {
 class _PresupuestosScreenState extends State<PresupuestosScreen> {
   List<Map<String, dynamic>> _presupuestos = [];
   List<Map<String, dynamic>> _presupuestosFiltrados = [];
-  final Map<int, String> _clientesNombres = {};
-  bool _isLoading = true;
   final TextEditingController _searchController = TextEditingController();
+  final Map<int, String> _clientesNombres = {}; // 👈 ESTA LÍNEA
+
+  bool _isLoading = true;
+  bool _sincronizando = false;
 
   @override
   void initState() {
@@ -38,41 +40,34 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final comercialId = prefs.getInt('comercial_id');
-      String url = prefs.getString('velneo_url') ?? '';
-      final String apiKey = prefs.getString('velneo_api_key') ?? '';
 
-      if (url.isNotEmpty && apiKey.isNotEmpty) {
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-          url = 'https://$url';
-        }
-
-        // Sincronizar desde Velneo
-        final apiService = VelneoAPIService(url, apiKey);
-        final presupuestosVelneo = await apiService.obtenerPresupuestos();
-
-        // Guardar en BD local
-        final db = DatabaseHelper.instance;
-        await db.insertarPresupuestosLote(
-          presupuestosVelneo.cast<Map<String, dynamic>>(),
-        );
-      }
-
-      // Cargar desde BD local
       final db = DatabaseHelper.instance;
       List<Map<String, dynamic>> presupuestos = await db.obtenerPresupuestos();
 
-      // Filtrar por comercial si está seleccionado
+      // Filtrar por comercial si está configurado
       if (comercialId != null) {
         presupuestos = presupuestos
             .where((p) => p['comercial_id'] == comercialId)
             .toList();
       }
 
+      // Cargar nombres de clientes
       final clientes = await db.obtenerClientes();
       _clientesNombres.clear();
       for (var cliente in clientes) {
         _clientesNombres[cliente['id'] as int] = cliente['nombre'] as String;
       }
+
+      // Ordenar por fecha descendente
+      presupuestos.sort((a, b) {
+        try {
+          final fechaA = DateTime.parse(a['fecha'] ?? '');
+          final fechaB = DateTime.parse(b['fecha'] ?? '');
+          return fechaB.compareTo(fechaA);
+        } catch (e) {
+          return 0;
+        }
+      });
 
       setState(() {
         _presupuestos = presupuestos;
@@ -87,31 +82,17 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
 
   void _filtrarPresupuestos() {
     final query = _searchController.text.toLowerCase();
-
     setState(() {
-      if (query.isEmpty) {
-        _presupuestosFiltrados = _presupuestos;
-      } else {
-        _presupuestosFiltrados = _presupuestos.where((presupuesto) {
-          final clienteNombre = _obtenerNombreCliente(
-            presupuesto['cliente_id'],
-          ).toLowerCase();
-          final numero = (presupuesto['numero'] ?? '').toString().toLowerCase();
-          final observaciones = (presupuesto['observaciones'] ?? '')
-              .toString()
-              .toLowerCase();
-
-          return clienteNombre.contains(query) ||
-              numero.contains(query) ||
-              observaciones.contains(query);
-        }).toList();
-      }
+      _presupuestosFiltrados = _presupuestos.where((presupuesto) {
+        final numero = presupuesto['numero']?.toString().toLowerCase() ?? '';
+        final estado = _getNombreEstado(presupuesto['estado']).toLowerCase();
+        final observaciones =
+            presupuesto['observaciones']?.toString().toLowerCase() ?? '';
+        return numero.contains(query) ||
+            estado.contains(query) ||
+            observaciones.contains(query);
+      }).toList();
     });
-  }
-
-  String _obtenerNombreCliente(int? clienteId) {
-    if (clienteId == null) return 'Sin cliente';
-    return _clientesNombres[clienteId] ?? 'Cliente desconocido';
   }
 
   String _formatearFecha(String? fecha) {
@@ -166,27 +147,28 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Presupuestos'),
-        backgroundColor: const Color(0xFF162846),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _cargarDatos,
-            tooltip: 'Recargar lista',
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
+      body: Column(
+        children: [
+          // Barra de búsqueda con botón de sincronización
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
               children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
+                Expanded(
                   child: TextField(
                     controller: _searchController,
                     decoration: InputDecoration(
-                      hintText: 'Buscar presupuestos por cliente, número...',
+                      hintText: 'Buscar presupuestos...',
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
@@ -201,227 +183,220 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
                       ),
                       filled: true,
                       fillColor: Colors.grey[100],
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.request_quote, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${_presupuestosFiltrados.length} presupuesto(s) encontrado(s)',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
+                const SizedBox(width: 12),
+
+                const SizedBox(width: 12),
+                // Botón de sincronización (el que ya tienes)
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF032458),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: _presupuestosFiltrados.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                _searchController.text.isEmpty
-                                    ? Icons.request_quote_outlined
-                                    : Icons.search_off,
-                                size: 64,
-                                color: Colors.grey,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                _searchController.text.isEmpty
-                                    ? 'No hay presupuestos'
-                                    : 'No se encontraron resultados',
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  color: Colors.grey,
+                const SizedBox(width: 12),
+                // Botón de sincronización
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF032458),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: _sincronizando
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.sync, color: Colors.white),
+                    onPressed: _sincronizando ? null : _sincronizarPresupuestos,
+                    tooltip: 'Sincronizar presupuestos',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Lista de presupuestos
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _presupuestosFiltrados.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _searchController.text.isEmpty
+                              ? Icons.request_quote_outlined
+                              : Icons.search_off,
+                          size: 64,
+                          color: Colors.grey,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          _searchController.text.isEmpty
+                              ? 'No hay presupuestos'
+                              : 'No se encontraron resultados',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(8),
+                    itemCount: _presupuestosFiltrados.length,
+                    itemBuilder: (context, index) {
+                      final presupuesto = _presupuestosFiltrados[index];
+                      final numeroPre = presupuesto['numero']?.toString() ?? '';
+                      final textoNumero = numeroPre.isNotEmpty
+                          ? numeroPre
+                          : 'Presupuesto #${presupuesto['id']}';
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: InkWell(
+                          onTap: () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => DetallePresupuestoScreen(
+                                  presupuesto: presupuesto,
                                 ),
                               ),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.all(8),
-                          itemCount: _presupuestosFiltrados.length,
-                          itemBuilder: (context, index) {
-                            final presupuesto = _presupuestosFiltrados[index];
-
-                            return Card(
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              child: InkWell(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          DetallePresupuestoScreen(
-                                            presupuesto: presupuesto,
-                                          ),
+                            );
+                            _cargarDatos();
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              children: [
+                                // Ícono de estado con badge debajo
+                                Column(
+                                  children: [
+                                    Container(
+                                      width: 56,
+                                      height: 56,
+                                      decoration: BoxDecoration(
+                                        color: _getColorEstado(
+                                          presupuesto['estado'],
+                                        ).withOpacity(0.1),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        _getIconoEstado(presupuesto['estado']),
+                                        color: _getColorEstado(
+                                          presupuesto['estado'],
+                                        ),
+                                        size: 28,
+                                      ),
                                     ),
-                                  );
-                                },
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12.0),
+                                    const SizedBox(height: 4),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _getColorEstado(
+                                          presupuesto['estado'],
+                                        ).withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        _getNombreEstado(presupuesto['estado']),
+                                        style: TextStyle(
+                                          color: _getColorEstado(
+                                            presupuesto['estado'],
+                                          ),
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(width: 16),
+                                // Información del presupuesto
+                                Expanded(
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            _getIconoEstado(
-                                              presupuesto['estado'],
-                                            ),
-                                            color: _getColorEstado(
-                                              presupuesto['estado'],
-                                            ),
-                                            size: 20,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            presupuesto['numero'] ??
-                                                'Presupuesto #${presupuesto['id']}',
-                                            style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          const Spacer(),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: _getColorEstado(
-                                                presupuesto['estado'],
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: Text(
-                                              _getNombreEstado(
-                                                presupuesto['estado'],
-                                              ),
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                      Text(
+                                        textoNumero,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
                                       ),
-                                      const SizedBox(height: 8),
-                                      Row(
-                                        children: [
-                                          const Icon(
-                                            Icons.business,
-                                            size: 16,
-                                            color: Colors.grey,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Expanded(
-                                            child: Text(
-                                              _obtenerNombreCliente(
-                                                presupuesto['cliente_id'],
-                                              ),
-                                              style: const TextStyle(
-                                                fontSize: 14,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        ],
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _obtenerNombreCliente(
+                                          presupuesto['cliente_id'],
+                                        ),
+                                        style: TextStyle(
+                                          color: Colors.grey[700],
+                                          fontSize: 14,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                       const SizedBox(height: 4),
                                       Row(
                                         children: [
-                                          const Icon(
+                                          Icon(
                                             Icons.calendar_today,
-                                            size: 16,
-                                            color: Colors.grey,
+                                            size: 14,
+                                            color: Colors.grey[600],
                                           ),
                                           const SizedBox(width: 4),
                                           Text(
                                             _formatearFecha(
                                               presupuesto['fecha'],
                                             ),
-                                            style: const TextStyle(
-                                              fontSize: 14,
-                                              color: Colors.grey,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      if (presupuesto['observaciones'] !=
-                                              null &&
-                                          presupuesto['observaciones']
-                                              .toString()
-                                              .isNotEmpty) ...[
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          presupuesto['observaciones'],
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.grey,
-                                          ),
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ],
-                                      const Divider(),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          const Text(
-                                            'Total:',
                                             style: TextStyle(
-                                              fontSize: 14,
-                                              color: Colors.grey,
+                                              color: Colors.grey[600],
+                                              fontSize: 13,
                                             ),
-                                          ),
-                                          Row(
-                                            children: [
-                                              Text(
-                                                '${(presupuesto['total'] ?? 0).toStringAsFixed(2)} €',
-                                                style: const TextStyle(
-                                                  fontSize: 18,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Color(0xFF032458),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              const Icon(
-                                                Icons.chevron_right,
-                                                color: Colors.grey,
-                                              ),
-                                            ],
                                           ),
                                         ],
                                       ),
                                     ],
                                   ),
                                 ),
-                              ),
-                            );
-                          },
+                                // Flecha de navegación
+                                Icon(
+                                  Icons.chevron_right,
+                                  color: Colors.grey[400],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                ),
-              ],
-            ),
-      floatingActionButton: FloatingActionButton.extended(
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
         onPressed: () async {
           final resultado = await Navigator.push(
             context,
@@ -434,9 +409,76 @@ class _PresupuestosScreenState extends State<PresupuestosScreen> {
           }
         },
         backgroundColor: const Color(0xFF032458),
-        icon: const Icon(Icons.add),
-        label: const Text('Nuevo Presupuesto'),
+        child: const Icon(Icons.add),
       ),
     );
+  }
+
+  String _obtenerNombreCliente(int? clienteId) {
+    if (clienteId == null) return 'Sin cliente';
+    return _clientesNombres[clienteId] ?? 'Cliente desconocido';
+  }
+
+  Future<void> _sincronizarPresupuestos() async {
+    setState(() => _sincronizando = true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      String url = prefs.getString('velneo_url') ?? '';
+      final String apiKey = prefs.getString('velneo_api_key') ?? '';
+
+      if (url.isEmpty || apiKey.isEmpty) {
+        throw Exception('Configura la URL y API Key en Configuración');
+      }
+
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://$url';
+      }
+
+      final apiService = VelneoAPIService(url, apiKey);
+      final db = DatabaseHelper.instance;
+
+      // Descargar TODOS los presupuestos (sin filtro de comercial)
+      final presupuestosLista = await apiService.obtenerPresupuestos();
+
+      await db.limpiarPresupuestos();
+      await db.insertarPresupuestosLote(
+        presupuestosLista.cast<Map<String, dynamic>>(),
+      );
+
+      // Descargar TODAS las líneas de presupuesto
+      final lineasPresupuesto = await apiService
+          .obtenerTodasLineasPresupuesto();
+      await db.insertarLineasPresupuestoLote(
+        lineasPresupuesto.cast<Map<String, dynamic>>(),
+      );
+
+      setState(() => _sincronizando = false);
+
+      // IMPORTANTE: Recargar los datos después de sincronizar
+      await _cargarDatos();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '✅ ${presupuestosLista.length} presupuestos sincronizados',
+          ),
+          backgroundColor: const Color(0xFF032458),
+        ),
+      );
+    } catch (e) {
+      setState(() => _sincronizando = false);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString().replaceAll('Exception: ', '')}'),
+          backgroundColor: const Color(0xFFF44336),
+        ),
+      );
+    }
   }
 }

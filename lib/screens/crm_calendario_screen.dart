@@ -4,8 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import 'detalle_visita_screen.dart';
 import 'crear_visita_screen.dart';
-import 'leads_screen.dart';
-import 'presupuestos_screen.dart';
 import '../services/api_service.dart';
 
 class CRMCalendarioScreen extends StatefulWidget {
