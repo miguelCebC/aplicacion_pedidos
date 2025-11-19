@@ -15,7 +15,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _comercialIdController = TextEditingController();
   final _codigoAppController = TextEditingController();
   final _serverUrlController = TextEditingController(
-    text: 'tecerp.nunsys.com:4311/TORRAL/TecERPv7_dat_dat',
+    text: 'tecerp.nunsys.com:4331/TORRAL/TecERPv7_dat_dat',
   );
   final _apiVersionController = TextEditingController(text: 'v1');
   final _apiKeyController = TextEditingController(text: '123456');

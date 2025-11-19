@@ -101,9 +101,6 @@ class _AuthScreenState extends State<AuthScreen> {
       });
     }
   }
-  // Reemplazar el método _validarContrasena() en lib/screens/auth_screen.dart (líneas ~87-121)
-
-  // Reemplazar el método _validarContrasena() en lib/screens/auth_screen.dart
 
   Future<void> _validarContrasena() async {
     final comercialId = int.tryParse(_comercialIdController.text.trim());
@@ -166,10 +163,7 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  // Actualizar el método _sincronizacionRapidaEnSegundoPlano() para que sea verdadero segundo plano
-
   Future<void> _sincronizacionRapidaEnSegundoPlano() async {
-    // Ejecutar en segundo plano sin bloquear navegación
     Future.delayed(Duration.zero, () async {
       try {
         print('🔄 [BACKGROUND] Iniciando sincronización rápida...');
