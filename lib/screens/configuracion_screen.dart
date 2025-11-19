@@ -680,7 +680,6 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       final pedidosNuevos = await apiService.obtenerPedidosIncrementales(
         fechaDesde,
       );
-
       if (pedidosNuevos.isNotEmpty) {
         await db.insertarPedidosLote(
           pedidosNuevos.cast<Map<String, dynamic>>(),
@@ -688,14 +687,15 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _addLog('✅ ${pedidosNuevos.length} pedidos actualizados');
 
         _addLog('📥 Actualizando líneas de pedido...');
+        await db.limpiarLineasPedido(); // 🔥 AGREGAR ESTA LÍNEA
         final lineasPedido = await apiService.obtenerTodasLineasPedido();
         await db.insertarLineasPedidoLote(
           lineasPedido.cast<Map<String, dynamic>>(),
         );
+        _addLog('✅ ${lineasPedido.length} líneas de pedido actualizadas');
       } else {
         _addLog('✓ No hay pedidos nuevos');
       }
-
       // Actualizar presupuestos
       setState(() {
         _syncStatus = 'Actualizando presupuestos...';
@@ -713,15 +713,18 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _addLog('✅ ${presupuestosNuevos.length} presupuestos actualizados');
 
         _addLog('📥 Actualizando líneas de presupuesto...');
+        await db.limpiarLineasPresupuesto(); // 🔥 AGREGAR ESTA LÍNEA
         final lineasPresupuesto = await apiService
             .obtenerTodasLineasPresupuesto();
         await db.insertarLineasPresupuestoLote(
           lineasPresupuesto.cast<Map<String, dynamic>>(),
         );
+        _addLog(
+          '✅ ${lineasPresupuesto.length} líneas de presupuesto actualizadas',
+        );
       } else {
         _addLog('✓ No hay presupuestos nuevos');
       }
-
       // Actualizar leads
       setState(() {
         _syncStatus = 'Actualizando leads...';

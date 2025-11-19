@@ -399,6 +399,16 @@ class DatabaseHelper {
     await db.delete('presupuestos');
   }
 
+  Future<void> limpiarLineasPedido() async {
+    final db = await database;
+    await db.delete('lineas_pedido');
+  }
+
+  Future<void> limpiarLineasPresupuesto() async {
+    final db = await database;
+    await db.delete('lineas_presupuesto');
+  }
+
   Future<int> actualizarPresupuestoSincronizado(
     int presupuestoId,
     int sincronizado,

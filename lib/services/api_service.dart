@@ -923,11 +923,10 @@ class VelneoAPIService {
                   'cantidad': _convertirADouble(linea['can_ped']),
                   'precio': _convertirADouble(linea['pre']),
                   'por_descuento': _convertirADouble(linea['por_dto']),
-                  'por_iva': _convertirADouble(linea['por_iva_apl']),
-                  'tipo_iva': linea['tip_iva'] ?? 'G',
+                  'por_iva': _convertirADouble(linea['iva_pje']),
+                  'tipo_iva': linea['reg_iva_vta'] ?? 'G',
                 };
               }).toList();
-
               if (lineasList.isEmpty) {
                 _log('  🏁 No hay más líneas de pedido');
                 break;
@@ -1016,6 +1015,7 @@ class VelneoAPIService {
                   'articulo_id': linea['art'] ?? 0,
                   'cantidad': _convertirADouble(linea['can']),
                   'precio': _convertirADouble(linea['pre']),
+                  'por_descuento': _convertirADouble(linea['por_dto']),
                   'por_iva': _convertirADouble(linea['iva_pje']),
                   'tipo_iva': linea['reg_iva_vta'] ?? 'G',
                 };
@@ -1600,13 +1600,13 @@ class VelneoAPIService {
               '  → Línea ID: ${linea['id']} - Art ${linea['art']} - Cant: ${linea['can_ped']} - Precio: ${linea['pre']}',
             );
             return {
-              'id': linea['id'], // 🔥 ID DEL SERVIDOR
               'pedido_id': linea['vta_ped'] ?? pedidoId,
               'articulo_id': linea['art'] ?? 0,
               'cantidad': _convertirADouble(linea['can_ped']),
               'precio': _convertirADouble(linea['pre']),
-              'por_descuento': _convertirADouble(linea['por_dto'] ?? 0),
-              'por_iva': _convertirADouble(linea['por_iva'] ?? 0),
+              'por_descuento': _convertirADouble(linea['por_dto']),
+              'por_iva': _convertirADouble(linea['iva_pje']),
+              'tipo_iva': linea['reg_iva_vta'] ?? 'G',
             };
           }).toList();
 
@@ -1653,13 +1653,13 @@ class VelneoAPIService {
               '  → Línea ID: ${linea['id']} - Art ${linea['art']} - Cant: ${linea['can']} - Precio: ${linea['pre']}',
             );
             return {
-              'id': linea['id'], // 🔥 ID DEL SERVIDOR
               'presupuesto_id': linea['vta_pre'] ?? presupuestoId,
               'articulo_id': linea['art'] ?? 0,
               'cantidad': _convertirADouble(linea['can']),
               'precio': _convertirADouble(linea['pre']),
-              'por_descuento': _convertirADouble(linea['por_dto'] ?? 0),
-              'por_iva': _convertirADouble(linea['por_iva'] ?? 0),
+              'por_descuento': _convertirADouble(linea['por_dto']),
+              'por_iva': _convertirADouble(linea['iva_pje']),
+              'tipo_iva': linea['reg_iva_vta'] ?? 'G',
             };
           }).toList();
 
