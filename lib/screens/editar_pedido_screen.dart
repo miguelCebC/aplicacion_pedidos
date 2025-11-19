@@ -1,3 +1,4 @@
+import 'dart:convert'; // 🟢 IMPORTANTE: Necesario para jsonEncode
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
@@ -6,7 +7,6 @@ import '../models/models.dart';
 import '../widgets/buscar_cliente_dialog.dart';
 import '../widgets/buscar_articulo_dialog.dart';
 import '../widgets/editar_linea_dialog.dart';
-import 'editar_pedido_screen.dart';
 
 class EditarPedidoScreen extends StatefulWidget {
   final Map<String, dynamic> pedido;
@@ -34,6 +34,109 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
   void dispose() {
     _observacionesController.dispose();
     super.dispose();
+  }
+
+  // ==============================================================
+  // 🟢 NUEVO MÉTODO: MOSTRAR JSON EN POPUP (DEBUG)
+  // ==============================================================
+  Future<void> _mostrarDebugJson() async {
+    if (_clienteSeleccionado == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Faltan datos para generar el JSON')),
+      );
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final comercialId = prefs.getInt('comercial_id');
+
+    final cabeceraJson = {
+      'emp': '1',
+      'emp_div': '1',
+      'clt': _clienteSeleccionado!['id'],
+      'cmr': comercialId,
+      'obs': _observacionesController.text,
+    };
+
+    final lineasJson = _lineas.map((l) {
+      return {
+        'vta_ped': widget.pedido['id'],
+        'emp': '1',
+        'art': l.articulo['id'],
+        'can_ped': l.cantidad,
+        'pre': l.precio,
+        'reg_iva_vta': l.tipoIva, // 🟢 CORREGIDO: Ahora muestra el campo real
+      };
+    }).toList();
+
+    final encoder = const JsonEncoder.withIndent('  ');
+    final headerString = encoder.convert(cabeceraJson);
+    final linesString = encoder.convert(lineasJson);
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🔍 DEBUG: JSON a Enviar'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'CABECERA:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.grey[200],
+                  width: double.infinity,
+                  child: Text(
+                    headerString,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'LÍNEAS (${lineasJson.length}):',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.grey[200],
+                  width: double.infinity,
+                  child: Text(
+                    linesString,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _cargarDatos() async {
@@ -68,13 +171,16 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
           },
         );
 
+        // 🟢 CORRECCIÓN: Aseguramos leer el tipo de IVA de la BD
+        String tipoIvaDb = linea['tipo_iva']?.toString() ?? 'G';
+
         lineasCargadas.add(
           LineaPedidoData(
             articulo: articulo,
             cantidad: (linea['cantidad'] as num).toDouble(),
             precio: (linea['precio'] as num).toDouble(),
             descuento: (linea['por_descuento'] as num?)?.toDouble() ?? 0.0,
-            tipoIva: 'G', // Por defecto, puedes ajustarlo según tus necesidades
+            tipoIva: tipoIvaDb, // Usar el valor real
           ),
         );
       }
@@ -98,75 +204,6 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
     );
     if (cliente != null) {
       setState(() => _clienteSeleccionado = cliente);
-    }
-  }
-
-  // 🔥 MÉTODO DEBUG PARA VER ESTRUCTURA DE LÍNEAS
-  Future<void> _debugVerLineas() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      String url = prefs.getString('velneo_url') ?? '';
-      final String apiKey = prefs.getString('velneo_api_key') ?? '';
-
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://$url';
-      }
-
-      final apiService = VelneoAPIService(url, apiKey);
-
-      // Obtener líneas del servidor
-      final lineasServidor = await apiService.obtenerLineasPedido(
-        widget.pedido['id'],
-      );
-
-      String mensaje = '📋 LÍNEAS EN EL SERVIDOR:\n\n';
-      mensaje += 'Total: ${lineasServidor.length} líneas\n\n';
-
-      for (int i = 0; i < lineasServidor.length; i++) {
-        final linea = lineasServidor[i];
-        mensaje += '═══ LÍNEA ${i + 1} ═══\n';
-        mensaje += 'Todos los campos:\n';
-        linea.forEach((key, value) {
-          mensaje += '  $key: $value\n';
-        });
-        mensaje += '\n';
-      }
-
-      if (!mounted) return;
-
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('🔍 DEBUG: Estructura de Líneas'),
-          content: SingleChildScrollView(
-            child: SelectableText(
-              mensaje,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cerrar'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('❌ Error'),
-          content: Text('Error al obtener líneas: $e'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cerrar'),
-            ),
-          ],
-        ),
-      );
     }
   }
 
@@ -200,7 +237,7 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
           cantidad: 1,
           precio: precioInfo['precio']!,
           descuento: precioInfo['descuento']!,
-          tipoIva: 'G',
+          tipoIva: 'G', // Valor por defecto al añadir nueva
         ),
       );
 
@@ -227,7 +264,7 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
         cantidad: lineaActual.cantidad,
         precio: lineaActual.precio,
         descuento: lineaActual.descuento,
-        tipoIva: lineaActual.tipoIva,
+        tipoIva: lineaActual.tipoIva, // Pasar valor actual
       ),
     );
 
@@ -309,11 +346,12 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
                 'articulo_id': linea.articulo['id'],
                 'cantidad': linea.cantidad,
                 'precio': linea.precio,
-                'tipo_iva': linea.tipoIva, // 🔥 AGREGAR TIPO DE IVA
+                'tipo_iva': linea.tipoIva, // 🟢 Importante: enviar IVA
               },
             )
             .toList(),
       };
+
       // Actualizar en Velneo API
       await apiService
           .actualizarPedido(widget.pedido['id'], pedidoData)
@@ -343,6 +381,7 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
           'precio': linea.precio,
           'por_descuento': linea.descuento,
           'por_iva': linea.porcentajeIva,
+          'tipo_iva': linea.tipoIva, // 🟢 Guardar también en local
         });
       }
 
@@ -393,11 +432,11 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
         title: Text('Editar Pedido #${widget.pedido['id']}'),
         backgroundColor: const Color(0xFF162846),
         actions: [
-          // 🔥 BOTÓN DEBUG
+          // 🟢 BOTÓN DE DEBUG JSON (NUEVO)
           IconButton(
             icon: const Icon(Icons.bug_report, color: Colors.orange),
-            onPressed: _debugVerLineas,
-            tooltip: 'Ver estructura de líneas',
+            onPressed: _mostrarDebugJson, // Llama al popup
+            tooltip: 'Ver JSON a enviar',
           ),
         ],
       ),

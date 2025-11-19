@@ -1,3 +1,4 @@
+import 'dart:convert'; // 🟢 IMPORTANTE: Necesario para jsonEncode
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
@@ -36,74 +37,117 @@ class _EditarPresupuestoScreenState extends State<EditarPresupuestoScreen> {
     super.dispose();
   }
 
-  // 🔥 MÉTODO DEBUG PARA VER ESTRUCTURA DE LÍNEAS
-  Future<void> _debugVerLineas() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      String url = prefs.getString('velneo_url') ?? '';
-      final String apiKey = prefs.getString('velneo_api_key') ?? '';
-
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://$url';
-      }
-
-      final apiService = VelneoAPIService(url, apiKey);
-
-      // Obtener líneas del servidor
-      final lineasServidor = await apiService.obtenerLineasPresupuesto(
-        widget.presupuesto['id'],
+  // ==============================================================
+  // 🟢 NUEVO MÉTODO: MOSTRAR JSON EN POPUP (DEBUG) - VERSIÓN PRESUPUESTOS
+  // ==============================================================
+  Future<void> _mostrarDebugJson() async {
+    if (_clienteSeleccionado == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Faltan datos para generar el JSON')),
       );
+      return;
+    }
 
-      String mensaje = '📋 LÍNEAS EN EL SERVIDOR:\n\n';
-      mensaje += 'Total: ${lineasServidor.length} líneas\n\n';
+    final prefs = await SharedPreferences.getInstance();
+    final comercialId = prefs.getInt('comercial_id');
 
-      for (int i = 0; i < lineasServidor.length; i++) {
-        final linea = lineasServidor[i];
-        mensaje += '═══ LÍNEA ${i + 1} ═══\n';
-        mensaje += 'Todos los campos:\n';
-        linea.forEach((key, value) {
-          mensaje += '  $key: $value\n';
-        });
-        mensaje += '\n';
-      }
+    // 1. Simular el JSON de Cabecera
+    final cabeceraJson = {
+      'emp': '1',
+      'emp_div': '1',
+      'clt': _clienteSeleccionado!['id'],
+      'cmr': comercialId, // O widget.presupuesto['comercial_id']
+      'obs': _observacionesController.text,
+      'est': widget.presupuesto['estado'] ?? 'P',
+    };
 
-      if (!mounted) return;
+    // 2. Simular el JSON de las Líneas
+    // Nota: En presupuestos los campos suelen ser 'vta_pre', 'can', 'pre'
+    final lineasJson = _lineas.map((l) {
+      return {
+        'vta_pre': widget.presupuesto['id'],
+        'emp': '1',
+        'art': l.articulo['id'],
+        'can': l
+            .cantidad, // En pedidos es 'can_ped', en presupuestos suele ser 'can'
+        'pre': l.precio,
+        // 🔥 CAMPO CLAVE VERIFICADO:
+        'reg_iva_vta': l.tipoIva,
+      };
+    }).toList();
 
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('🔍 DEBUG: Estructura de Líneas'),
-          content: SingleChildScrollView(
-            child: SelectableText(
-              mensaje,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+    // Convertir a String bonito
+    final encoder = const JsonEncoder.withIndent('  ');
+    final headerString = encoder.convert(cabeceraJson);
+    final linesString = encoder.convert(lineasJson);
+
+    if (!mounted) return;
+
+    // Mostrar Popup
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🔍 DEBUG: JSON Presupuesto'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'CABECERA (PUT/POST):',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.grey[200],
+                  width: double.infinity,
+                  child: Text(
+                    headerString,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'LÍNEAS (${lineasJson.length}) (POST individuales):',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.grey[200],
+                  width: double.infinity,
+                  child: Text(
+                    linesString,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cerrar'),
-            ),
-          ],
         ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('❌ Error'),
-          content: Text('Error al obtener líneas: $e'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cerrar'),
-            ),
-          ],
-        ),
-      );
-    }
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
+  // ==============================================================
 
   Future<void> _cargarDatos() async {
     setState(() => _isLoading = true);
@@ -139,13 +183,16 @@ class _EditarPresupuestoScreenState extends State<EditarPresupuestoScreen> {
           },
         );
 
+        // 🟢 CORRECCIÓN: Leer IVA de la BD correctamente
+        String tipoIvaDb = linea['tipo_iva']?.toString() ?? 'G';
+
         lineasCargadas.add(
           LineaPedidoData(
             articulo: articulo,
             cantidad: (linea['cantidad'] as num).toDouble(),
             precio: (linea['precio'] as num).toDouble(),
             descuento: (linea['por_descuento'] as num?)?.toDouble() ?? 0.0,
-            tipoIva: 'G',
+            tipoIva: tipoIvaDb, // Usar el valor real
           ),
         );
       }
@@ -203,7 +250,7 @@ class _EditarPresupuestoScreenState extends State<EditarPresupuestoScreen> {
           cantidad: 1,
           precio: precioInfo['precio']!,
           descuento: precioInfo['descuento']!,
-          tipoIva: 'G',
+          tipoIva: 'G', // Valor por defecto
         ),
       );
 
@@ -307,13 +354,15 @@ class _EditarPresupuestoScreenState extends State<EditarPresupuestoScreen> {
         'comercial_id': comercialId,
         'observaciones': _observacionesController.text,
         'estado': widget.presupuesto['estado'] ?? 'P',
+        // Preparamos las líneas con el campo correcto para API
         'lineas': _lineas
             .map(
               (linea) => {
                 'articulo_id': linea.articulo['id'],
                 'cantidad': linea.cantidad,
                 'precio': linea.precio,
-                'tipo_iva': linea.tipoIva, // 🔥 AGREGAR TIPO DE IVA
+                'tipo_iva': linea
+                    .tipoIva, // 🟢 Campo corregido (reg_iva_vta se mapea en api_service)
               },
             )
             .toList(),
@@ -334,7 +383,7 @@ class _EditarPresupuestoScreenState extends State<EditarPresupuestoScreen> {
         'cliente_id': _clienteSeleccionado!['id'],
         'observaciones': _observacionesController.text,
         'total': _calcularTotal(),
-        'sincronizado': 1, // Marcar como sincronizado
+        'sincronizado': 1,
       });
 
       // Actualizar líneas en BD local
@@ -348,6 +397,7 @@ class _EditarPresupuestoScreenState extends State<EditarPresupuestoScreen> {
           'precio': linea.precio,
           'por_descuento': linea.descuento,
           'por_iva': linea.porcentajeIva,
+          'tipo_iva': linea.tipoIva, // 🟢 Guardar IVA en local
         });
       }
 
@@ -400,11 +450,11 @@ class _EditarPresupuestoScreenState extends State<EditarPresupuestoScreen> {
         title: Text('Editar Presupuesto #${widget.presupuesto['id']}'),
         backgroundColor: const Color(0xFF162846),
         actions: [
-          // 🔥 BOTÓN DEBUG
+          // 🟢 BOTÓN DE DEBUG JSON (NUEVO)
           IconButton(
             icon: const Icon(Icons.bug_report, color: Colors.orange),
-            onPressed: _debugVerLineas,
-            tooltip: 'Ver estructura de líneas',
+            onPressed: _mostrarDebugJson,
+            tooltip: 'Ver JSON a enviar',
           ),
         ],
       ),

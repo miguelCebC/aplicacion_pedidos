@@ -366,9 +366,6 @@ class VelneoAPIService {
     }
   }
 
-  // Actualizar pedido existente (POST con ID)
-  // Actualizar pedido existente (POST con ID)
-  // Actualizar pedido existente (POST con ID)
   // Actualizar pedido existente
   Future<Map<String, dynamic>> actualizarPedido(
     int pedidoId,
@@ -381,117 +378,71 @@ class VelneoAPIService {
         'clt': pedido['cliente_id'],
       };
 
-      if (pedido['cmr'] != null) {
-        pedidoVelneo['cmr'] = pedido['cmr'];
-      }
-
-      if (pedido['observaciones'] != null) {
+      if (pedido['cmr'] != null) pedidoVelneo['cmr'] = pedido['cmr'];
+      if (pedido['observaciones'] != null)
         pedidoVelneo['obs'] = pedido['observaciones'];
-      }
 
       print('📝 Actualizando pedido #$pedidoId en Velneo');
 
       final httpClient = HttpClient()
         ..badCertificateCallback =
             ((X509Certificate cert, String host, int port) => true)
-        ..connectionTimeout = const Duration(seconds: 30);
+        ..connectionTimeout = const Duration(seconds: 45);
 
       try {
-        // PASO 1: Obtener líneas actuales del servidor
-        print('📋 PASO 1: Obteniendo líneas actuales del servidor');
+        // 1. Obtener líneas actuales
         final lineasActuales = await obtenerLineasPedido(pedidoId);
-        print('   Encontradas ${lineasActuales.length} líneas en servidor');
 
-        // PASO 2: Eliminar TODAS las líneas antiguas usando sus IDs
-        print(
-          '🗑️ PASO 2: Eliminando ${lineasActuales.length} líneas antiguas',
-        );
+        // 2. Eliminar líneas antiguas
+        print('🗑️ Eliminando ${lineasActuales.length} líneas antiguas...');
         for (var linea in lineasActuales) {
-          try {
-            final lineaId = linea['id'];
-            if (lineaId != null) {
-              final request = await httpClient.deleteUrl(
-                Uri.parse(_buildUrl('/VTA_PED_LIN_G/$lineaId')),
-              );
-              request.headers.set('Accept', 'application/json');
-              final response = await request.close();
-
-              if (response.statusCode == 200 || response.statusCode == 204) {
-                print('   ✓ Línea $lineaId eliminada');
-              } else {
-                print(
-                  '   ⚠️ Error eliminando línea $lineaId: ${response.statusCode}',
-                );
-              }
-              await Future.delayed(const Duration(milliseconds: 50));
-            }
-          } catch (e) {
-            print('   ⚠️ Error eliminando línea: $e');
+          if (linea['id'] != null) {
+            final request = await httpClient.deleteUrl(
+              Uri.parse(_buildUrl('/VTA_PED_LIN_G/${linea['id']}')),
+            );
+            request.headers.set('Accept', 'application/json');
+            final response = await request.close();
+            await response.drain();
           }
         }
 
-        // Esperar que se completen las eliminaciones
-        await Future.delayed(const Duration(milliseconds: 500));
-        print('   ✅ Eliminación completada');
+        await Future.delayed(const Duration(milliseconds: 200));
 
-        // PASO 3: Actualizar datos del pedido
-        print('📝 PASO 3: Actualizando datos del pedido');
-        final request = await httpClient
-            .postUrl(Uri.parse(_buildUrl('/VTA_PED_G/$pedidoId')))
-            .timeout(const Duration(seconds: 30));
-
+        // 3. Actualizar Cabecera
+        final request = await httpClient.postUrl(
+          Uri.parse(_buildUrl('/VTA_PED_G/$pedidoId')),
+        );
         request.headers.set('Content-Type', 'application/json');
         request.headers.set('Accept', 'application/json');
-        request.headers.set('User-Agent', 'Flutter App');
         request.write(json.encode(pedidoVelneo));
 
-        final response = await request.close().timeout(
-          const Duration(seconds: 30),
-        );
-        final stringData = await response
-            .transform(utf8.decoder)
-            .join()
-            .timeout(const Duration(seconds: 10));
-
-        print(
-          '📥 Respuesta actualizar pedido - Status: ${response.statusCode}',
-        );
+        final response = await request.close();
+        final stringData = await response.transform(utf8.decoder).join();
 
         if (response.statusCode == 200 || response.statusCode == 201) {
-          print('   ✅ Pedido actualizado');
+          print('   ✅ Cabecera actualizada');
 
-          // Esperar antes de crear nuevas líneas
-          await Future.delayed(const Duration(milliseconds: 500));
-
-          // PASO 4: Crear TODAS las líneas nuevas
+          // 4. Crear nuevas líneas
           int lineasOk = 0;
           if (pedido['lineas'] != null) {
-            print(
-              '📝 PASO 4: Creando ${pedido['lineas'].length} líneas nuevas',
-            );
             for (var linea in pedido['lineas']) {
               try {
-                final lineaConIva = {
+                final nuevaLinea = {
                   'articulo_id': linea['articulo_id'],
-                  'cantidad': linea['cantidad'],
-                  'precio': linea['precio'],
-                  'reg_iva_vt_imp_pla': linea['tipo_iva'] ?? 'G',
+                  'cantidad': (linea['cantidad'] as num).toDouble(),
+                  'precio': (linea['precio'] as num).toDouble(),
+                  'tipo_iva': linea['tipo_iva'] ?? 'G', // Pasamos el dato
                 };
-                await crearLineaPedido(pedidoId, lineaConIva);
+                // crearLineaPedido se encargará de ponerlo en 'reg_iva_vta'
+                await crearLineaPedido(pedidoId, nuevaLinea);
                 lineasOk++;
-                print('   ✓ Línea $lineasOk/${pedido['lineas'].length} creada');
-                await Future.delayed(const Duration(milliseconds: 100));
               } catch (e) {
                 print('   ⚠️ Error creando línea: $e');
               }
             }
           }
-
-          print('✅ COMPLETADO: $lineasOk líneas creadas');
-
           return {'id': pedidoId, 'lineas_creadas': lineasOk, 'success': true};
         }
-
         throw Exception('Error HTTP ${response.statusCode}: $stringData');
       } finally {
         httpClient.close();
@@ -517,11 +468,9 @@ class VelneoAPIService {
       if (presupuesto['comercial_id'] != null) {
         presupuestoVelneo['cmr'] = presupuesto['comercial_id'];
       }
-
       if (presupuesto['observaciones'] != null) {
         presupuestoVelneo['obs'] = presupuesto['observaciones'];
       }
-
       if (presupuesto['estado'] != null) {
         presupuestoVelneo['est'] = presupuesto['estado'];
       }
@@ -531,89 +480,52 @@ class VelneoAPIService {
       final httpClient = HttpClient()
         ..badCertificateCallback =
             ((X509Certificate cert, String host, int port) => true)
-        ..connectionTimeout = const Duration(seconds: 30);
+        ..connectionTimeout = const Duration(seconds: 45);
 
       try {
-        // PASO 1: Obtener líneas actuales del servidor
-        print('📋 PASO 1: Obteniendo líneas actuales del servidor');
+        // 1. Obtener líneas actuales
         final lineasActuales = await obtenerLineasPresupuesto(presupuestoId);
-        print('   Encontradas ${lineasActuales.length} líneas en servidor');
 
-        // PASO 2: Eliminar TODAS las líneas antiguas usando sus IDs
-        print(
-          '🗑️ PASO 2: Eliminando ${lineasActuales.length} líneas antiguas',
-        );
+        // 2. Eliminar líneas antiguas
+        print('🗑️ Eliminando ${lineasActuales.length} líneas antiguas');
         for (var linea in lineasActuales) {
-          try {
-            final lineaId = linea['id'];
-            if (lineaId != null) {
-              final request = await httpClient.deleteUrl(
-                Uri.parse(_buildUrl('/VTA_PRE_LIN_G/$lineaId')),
-              );
-              request.headers.set('Accept', 'application/json');
-              final response = await request.close();
-
-              if (response.statusCode == 200 || response.statusCode == 204) {
-                print('   ✓ Línea $lineaId eliminada');
-              } else {
-                print(
-                  '   ⚠️ Error eliminando línea $lineaId: ${response.statusCode}',
-                );
-              }
-              await Future.delayed(const Duration(milliseconds: 50));
-            }
-          } catch (e) {
-            print('   ⚠️ Error eliminando línea: $e');
+          if (linea['id'] != null) {
+            final request = await httpClient.deleteUrl(
+              Uri.parse(_buildUrl('/VTA_PRE_LIN_G/${linea['id']}')),
+            );
+            request.headers.set('Accept', 'application/json');
+            final response = await request.close();
+            await response.drain();
           }
         }
 
-        // Esperar que se completen las eliminaciones
-        await Future.delayed(const Duration(milliseconds: 500));
-        print('   ✅ Eliminación completada');
+        await Future.delayed(const Duration(milliseconds: 200));
 
-        // PASO 3: Actualizar datos del presupuesto
-        print('📝 PASO 3: Actualizando datos del presupuesto');
+        // 3. Actualizar Cabecera
         final request = await httpClient
             .postUrl(Uri.parse(_buildUrl('/VTA_PRE_G/$presupuestoId')))
             .timeout(const Duration(seconds: 30));
 
         request.headers.set('Content-Type', 'application/json');
         request.headers.set('Accept', 'application/json');
-        request.headers.set('User-Agent', 'Flutter App');
         request.write(json.encode(presupuestoVelneo));
 
-        final response = await request.close().timeout(
-          const Duration(seconds: 30),
-        );
-        final stringData = await response
-            .transform(utf8.decoder)
-            .join()
-            .timeout(const Duration(seconds: 10));
-
-        print(
-          '📥 Respuesta actualizar presupuesto - Status: ${response.statusCode}',
-        );
+        final response = await request.close();
+        final stringData = await response.transform(utf8.decoder).join();
 
         if (response.statusCode == 200 || response.statusCode == 201) {
-          print('   ✅ Presupuesto actualizado');
-
-          // Esperar antes de crear nuevas líneas
-          await Future.delayed(const Duration(milliseconds: 500));
-
-          // PASO 4: Crear TODAS las líneas nuevas
+          // 4. Crear nuevas líneas
           int lineasOk = 0;
           if (presupuesto['lineas'] != null) {
-            print(
-              '📝 PASO 4: Creando ${presupuesto['lineas'].length} líneas nuevas',
-            );
             for (var linea in presupuesto['lineas']) {
               try {
+                // 🟢 CORRECCIÓN: Añadido campo IVA para presupuestos
                 final lineaData = {
                   'vta_pre': presupuestoId,
                   'art': linea['articulo_id'],
-                  'can': linea['cantidad'],
-                  'pre': linea['precio'],
-                  'reg_iva_vta': linea['tipo_iva'] ?? 'G',
+                  'can': (linea['cantidad'] as num).toDouble(),
+                  'pre': (linea['precio'] as num).toDouble(),
+                  'reg_iva_vta': linea['tipo_iva'] ?? 'G', // CAMPO CRUCIAL
                 };
 
                 final lineaRequest = await httpClient
@@ -625,29 +537,23 @@ class VelneoAPIService {
                 lineaRequest.write(json.encode(lineaData));
 
                 final lineaResponse = await lineaRequest.close();
+                await lineaResponse.drain();
+
                 if (lineaResponse.statusCode == 200 ||
                     lineaResponse.statusCode == 201) {
                   lineasOk++;
-                  print(
-                    '   ✓ Línea $lineasOk/${presupuesto['lineas'].length} creada',
-                  );
                 }
-                await Future.delayed(const Duration(milliseconds: 100));
               } catch (e) {
-                print('   ⚠️ Error creando línea: $e');
+                print('⚠️ Error línea presupuesto: $e');
               }
             }
           }
-
-          print('✅ COMPLETADO: $lineasOk líneas creadas');
-
           return {
             'id': presupuestoId,
             'lineas_creadas': lineasOk,
             'success': true,
           };
         }
-
         throw Exception('Error HTTP ${response.statusCode}: $stringData');
       } finally {
         httpClient.close();
@@ -1596,10 +1502,9 @@ class VelneoAPIService {
 
         if (data['vta_ped_lin_g'] != null && data['vta_ped_lin_g'] is List) {
           final lineasList = (data['vta_ped_lin_g'] as List).map((linea) {
-            _log(
-              '  → Línea ID: ${linea['id']} - Art ${linea['art']} - Cant: ${linea['can_ped']} - Precio: ${linea['pre']}',
-            );
+            _log('  → Línea ID: ${linea['id']} - Art ${linea['art']}');
             return {
+              'id': linea['id'], // <--- ¡IMPORTANTE! Necesario para borrar
               'pedido_id': linea['vta_ped'] ?? pedidoId,
               'articulo_id': linea['art'] ?? 0,
               'cantidad': _convertirADouble(linea['can_ped']),
@@ -1610,14 +1515,11 @@ class VelneoAPIService {
             };
           }).toList();
 
-          _log('✅ ${lineasList.length} líneas de pedido descargadas');
           return lineasList;
         } else {
-          _log('⚠️ No se encontraron líneas para el pedido $pedidoId');
           return [];
         }
       }
-
       throw Exception(
         'Error al obtener líneas de pedido: ${response.statusCode}',
       );
@@ -1636,23 +1538,17 @@ class VelneoAPIService {
         'page[size]': '100',
       });
 
-      _log('🌐 URL líneas presupuesto: $url');
-
       final response = await _getWithSSL(
         url,
       ).timeout(const Duration(seconds: 30));
-
-      _log('📥 Status code líneas presupuesto: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
 
         if (data['vta_pre_lin_g'] != null && data['vta_pre_lin_g'] is List) {
           final lineasList = (data['vta_pre_lin_g'] as List).map((linea) {
-            _log(
-              '  → Línea ID: ${linea['id']} - Art ${linea['art']} - Cant: ${linea['can']} - Precio: ${linea['pre']}',
-            );
             return {
+              'id': linea['id'], // <--- ¡IMPORTANTE! Necesario para borrar
               'presupuesto_id': linea['vta_pre'] ?? presupuestoId,
               'articulo_id': linea['art'] ?? 0,
               'cantidad': _convertirADouble(linea['can']),
@@ -1663,16 +1559,11 @@ class VelneoAPIService {
             };
           }).toList();
 
-          _log('✅ ${lineasList.length} líneas de presupuesto descargadas');
           return lineasList;
         } else {
-          _log(
-            '⚠️ No se encontraron líneas para el presupuesto $presupuestoId',
-          );
           return [];
         }
       }
-
       throw Exception(
         'Error al obtener líneas de presupuesto: ${response.statusCode}',
       );
@@ -1786,20 +1677,36 @@ class VelneoAPIService {
     final httpClient = HttpClient()
       ..badCertificateCallback =
           ((X509Certificate cert, String host, int port) => true)
-      ..connectionTimeout = const Duration(seconds: 20);
+      ..connectionTimeout = const Duration(seconds: 30);
 
     try {
+      // Robustez para nombres de campos
+      final artId = linea['articulo_id'] ?? linea['art'];
+      final cantidad = linea['cantidad'] ?? linea['can_ped'];
+      final precio = linea['precio'] ?? linea['pre_ven'] ?? linea['pre'];
+
+      // Buscamos el IVA en cualquiera de sus posibles nombres
+      final tipoIva = linea['tipo_iva'] ?? linea['reg_iva_vta'] ?? 'G';
+
       final lineaVelneo = {
         'vta_ped': pedidoId,
         'emp': '1',
-        'art': linea['articulo_id'],
-        'can_ped': linea['cantidad'],
-        'pre': linea['precio'],
+        'art': artId,
+        'can_ped': _convertirADouble(cantidad),
+        'pre': _convertirADouble(precio),
+        'reg_iva_vta':
+            tipoIva, // 🟢 CORREGIDO: Nombre exacto del campo en Velneo
       };
+
+      if (linea['descuento'] != null || linea['por_dto'] != null) {
+        lineaVelneo['por_dto'] = _convertirADouble(
+          linea['descuento'] ?? linea['por_dto'],
+        );
+      }
 
       final request = await httpClient
           .postUrl(Uri.parse(_buildUrl('/VTA_PED_LIN_G')))
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 30));
 
       request.headers.set('Content-Type', 'application/json');
       request.headers.set('Accept', 'application/json');
@@ -1807,12 +1714,9 @@ class VelneoAPIService {
       request.write(json.encode(lineaVelneo));
 
       final response = await request.close().timeout(
-        const Duration(seconds: 20),
+        const Duration(seconds: 30),
       );
-      final stringData = await response
-          .transform(utf8.decoder)
-          .join()
-          .timeout(const Duration(seconds: 10));
+      final stringData = await response.transform(utf8.decoder).join();
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         return json.decode(stringData);
@@ -3486,6 +3390,56 @@ class VelneoAPIService {
     } catch (e) {
       print('❌ Error en obtenerClientesIncrementales: $e');
       rethrow;
+    }
+  }
+
+  Future<Map<String, double>> obtenerConfiguracionIVA() async {
+    try {
+      // Usamos IMP_M que es la tabla estándar de impuestos.
+      // Si tu tabla es diferente, cambia '/IMP_M'
+      final url = _buildUrlWithParams('/IMP_M', {'page[size]': '100'});
+      print('📥 Descargando configuración de IVA desde $url');
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        // Valores por defecto seguros
+        double general = 21.0;
+        double reducido = 10.0;
+        double superReducido = 4.0;
+        double exento = 0.0;
+
+        // Mapeo de la respuesta
+        if (data['imp_m'] != null && data['imp_m'] is List) {
+          for (var imp in data['imp_m']) {
+            // Asumimos 'cod' para el código (G, R, S) y 'por' para el porcentaje
+            // Si en tu vServer los campos son diferentes, cámbialos aquí.
+            final codigo = imp['cod']?.toString() ?? '';
+            final porcentaje = _convertirADouble(imp['por']);
+
+            if (codigo == 'G') general = porcentaje;
+            if (codigo == 'R') reducido = porcentaje;
+            if (codigo == 'S') superReducido = porcentaje;
+            if (codigo == 'X') exento = porcentaje;
+          }
+        }
+
+        return {
+          'iva_general': general,
+          'iva_reducido': reducido,
+          'iva_superreducido': superReducido,
+          'iva_exento': exento,
+        };
+      }
+      print('⚠️ Error descargando IVA: Status ${response.statusCode}');
+      return {};
+    } catch (e) {
+      print('❌ Error en obtenerConfiguracionIVA: $e');
+      return {};
     }
   }
 

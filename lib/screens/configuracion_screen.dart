@@ -187,347 +187,211 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       );
       final db = DatabaseHelper.instance;
 
+      // --- 1. Conexión ---
       setState(() {
         _syncStatus = 'Verificando conexión...';
         _syncProgress = 0.05;
       });
 
-      _addLog('🔌 Verificando conexión con API');
       final conexionOk = await apiService.probarConexion();
-      if (!conexionOk) {
-        throw Exception('No se puede conectar a la API');
-      }
+      if (!conexionOk) throw Exception('No se puede conectar a la API');
       _addLog('✅ Conexión exitosa');
 
+      // --- 2. Artículos ---
       setState(() {
-        _syncStatus = 'Descargando datos...';
-        _syncProgress = 0.1;
-        _syncDetalle = 'Iniciando descarga';
+        _syncStatus = 'Artículos...';
+        _syncProgress = 0.10;
       });
-
       _addLog('📦 Descargando artículos');
       final articulosLista = await apiService.obtenerArticulos();
-      _addLog('✅ ${articulosLista.length} artículos descargados');
 
-      // ================================================
-      // == 🟢 ESTA ES LA VERSIÓN QUE ESPERA UN MAPA ==
-      // ================================================
-      _addLog('📥 Descargando clientes y comerciales (endpoint /ENT_M)...');
-      final resultadoClientes = await apiService.obtenerClientes();
-      final clientesLista = resultadoClientes['clientes'] as List;
-      final comercialesLista = resultadoClientes['comerciales'] as List;
-      _addLog('✅ ${clientesLista.length} clientes únicos descargados');
-      _addLog('✅ ${comercialesLista.length} comerciales únicos descargados');
-      // ================================================
-
-      setState(() {
-        _syncProgress = 0.5;
-        _syncStatus = 'Descarga completa';
-        _syncDetalle =
-            '${articulosLista.length} artículos, ${clientesLista.length} clientes, ${comercialesLista.length} comerciales';
-      });
-
-      // GUARDAR ARTÍCULOS
-      setState(() {
-        _syncStatus = 'Guardando artículos...';
-        _syncProgress = 0.55;
-        _syncDetalle = 'Preparando...';
-      });
-
-      _addLog('🧹 Limpiando artículos antiguos');
       await db.limpiarArticulos();
-
       const batchSize = 500;
-      _addLog(
-        '💾 Guardando ${articulosLista.length} artículos en lotes de $batchSize',
-      );
-
       for (var i = 0; i < articulosLista.length; i += batchSize) {
         final end = (i + batchSize < articulosLista.length)
             ? i + batchSize
             : articulosLista.length;
-        final batch = articulosLista
-            .sublist(i, end)
-            .cast<Map<String, dynamic>>();
-
-        await db.insertarArticulosLote(batch);
-
-        final progreso = 0.55 + (0.2 * (end / articulosLista.length));
-        final porcentaje = ((end / articulosLista.length) * 100).toInt();
-
-        setState(() {
-          _syncProgress = progreso;
-          _syncDetalle = '$end / ${articulosLista.length} ($porcentaje%)';
-        });
+        await db.insertarArticulosLote(
+          articulosLista.sublist(i, end).cast<Map<String, dynamic>>(),
+        );
       }
-
       _addLog('✅ ${articulosLista.length} artículos guardados');
 
-      // GUARDAR CLIENTES
+      // --- 3. Clientes y Comerciales ---
       setState(() {
-        _syncStatus = 'Guardando clientes...';
-        _syncProgress = 0.75;
-        _syncDetalle = 'Preparando...';
+        _syncStatus = 'Clientes...';
+        _syncProgress = 0.30;
       });
+      _addLog('📥 Descargando clientes y comerciales...');
+      final resultadoClientes = await apiService.obtenerClientes();
+      final clientesLista = resultadoClientes['clientes'] as List;
+      final comercialesLista = resultadoClientes['comerciales'] as List;
 
-      _addLog('🧹 Limpiando clientes antiguos');
       await db.limpiarClientes();
-
-      _addLog(
-        '💾 Guardando ${clientesLista.length} clientes en lotes de $batchSize',
-      );
-
       for (var i = 0; i < clientesLista.length; i += batchSize) {
         final end = (i + batchSize < clientesLista.length)
             ? i + batchSize
             : clientesLista.length;
-        final batch = clientesLista
-            .sublist(i, end)
-            .cast<Map<String, dynamic>>();
-
-        await db.insertarClientesLote(batch);
-
-        final progreso = 0.75 + (0.15 * (end / clientesLista.length));
-        final porcentaje = ((end / clientesLista.length) * 100).toInt();
-
-        setState(() {
-          _syncProgress = progreso;
-          _syncDetalle = '$end / ${clientesLista.length} ($porcentaje%)';
-        });
-      }
-
-      _addLog('✅ ${clientesLista.length} clientes guardados');
-
-      // GUARDAR COMERCIALES
-      setState(() {
-        _syncStatus = 'Guardando comerciales...';
-        _syncProgress = 0.90;
-        _syncDetalle = 'Preparando...';
-      });
-
-      _addLog('🧹 Limpiando comerciales antiguos');
-      await db.limpiarComerciales();
-
-      _addLog(
-        '💾 Guardando ${comercialesLista.length} comerciales (desde API)',
-      );
-
-      if (comercialesLista.isNotEmpty) {
-        await db.insertarComercialesLote(
-          comercialesLista.cast<Map<String, dynamic>>(),
+        await db.insertarClientesLote(
+          clientesLista.sublist(i, end).cast<Map<String, dynamic>>(),
         );
       }
 
-      // Volvemos a leer de la DB para saber el número REAL
-      final comercialesGuardados = await db.obtenerComerciales();
-      _addLog('✅ ${comercialesGuardados.length} comerciales AHORA EN DB');
+      await db.limpiarComerciales();
+      await db.insertarComercialesLote(
+        comercialesLista.cast<Map<String, dynamic>>(),
+      );
 
-      // Recargar lista de comerciales para la UI
+      // Actualizar lista en memoria
+      final comercialesDb = await db.obtenerComerciales();
+      setState(() => _comerciales = comercialesDb);
+
+      _addLog(
+        '✅ ${clientesLista.length} clientes y ${comercialesLista.length} comerciales',
+      );
+
+      // --- 4. Datos Maestros CRM ---
       setState(() {
-        _comerciales = comercialesGuardados;
+        _syncStatus = 'Datos CRM...';
+        _syncProgress = 0.50;
       });
 
-      // === SINCRONIZAR DATOS CRM ===
-      setState(() {
-        _syncStatus = 'Descargando datos CRM...';
-        _syncProgress = 0.92;
-        _syncDetalle = 'Tipos de visita y provincias';
-      });
+      _addLog('📥 Tipos visita, provincias, zonas...');
 
-      _addLog('📥 Descargando tipos de visita...');
-      final tiposVisitaLista = await apiService.obtenerTiposVisita();
+      final tiposVisita = await apiService.obtenerTiposVisita();
       await db.limpiarTiposVisita();
       await db.insertarTiposVisitaLote(
-        tiposVisitaLista.cast<Map<String, dynamic>>(),
+        tiposVisita.cast<Map<String, dynamic>>(),
       );
-      _addLog('✅ ${tiposVisitaLista.length} tipos de visita guardados');
 
-      _addLog('📥 Descargando provincias...');
-      final provinciasLista = await apiService.obtenerProvincias();
+      final provincias = await apiService.obtenerProvincias();
       await db.limpiarProvincias();
-      await db.insertarProvinciasLote(
-        provinciasLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${provinciasLista.length} provincias guardadas');
+      await db.insertarProvinciasLote(provincias.cast<Map<String, dynamic>>());
 
-      _addLog('📥 Descargando zonas técnicas...');
-      final zonasLista = await apiService.obtenerZonasTecnicas();
+      final zonas = await apiService.obtenerZonasTecnicas();
       await db.limpiarZonasTecnicas();
-      await db.insertarZonasTecnicasLote(
-        zonasLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${zonasLista.length} zonas técnicas guardadas');
+      await db.insertarZonasTecnicasLote(zonas.cast<Map<String, dynamic>>());
 
-      _addLog('📥 Descargando poblaciones...');
-      final poblacionesLista = await apiService.obtenerPoblaciones();
+      final poblaciones = await apiService.obtenerPoblaciones();
       await db.limpiarPoblaciones();
       await db.insertarPoblacionesLote(
-        poblacionesLista.cast<Map<String, dynamic>>(),
+        poblaciones.cast<Map<String, dynamic>>(),
       );
-      _addLog('✅ ${poblacionesLista.length} poblaciones guardadas');
 
-      setState(() {
-        _syncProgress = 0.94;
-        _syncDetalle = 'Campañas y leads';
-      });
-
-      _addLog('📥 Descargando campañas comerciales...');
-      final campanasLista = await apiService.obtenerCampanas();
+      final campanas = await apiService.obtenerCampanas();
       await db.limpiarCampanas();
-      await db.insertarCampanasLote(campanasLista.cast<Map<String, dynamic>>());
-      _addLog('✅ ${campanasLista.length} campañas guardadas');
+      await db.insertarCampanasLote(campanas.cast<Map<String, dynamic>>());
 
-      _addLog('📥 Descargando leads...');
-      final leadsLista = await apiService.obtenerLeads();
+      _addLog('✅ Maestros CRM actualizados');
+
+      // --- 5. Datos Transaccionales (Leads, Agenda, Pedidos, Presupuestos) ---
+      setState(() {
+        _syncStatus = 'Datos Usuario...';
+        _syncProgress = 0.70;
+      });
+
+      // Leads
+      final leads = await apiService.obtenerLeads();
       await db.limpiarLeads();
-      await db.insertarLeadsLote(leadsLista.cast<Map<String, dynamic>>());
-      _addLog('✅ ${leadsLista.length} leads guardados');
+      await db.insertarLeadsLote(leads.cast<Map<String, dynamic>>());
 
-      setState(() {
-        _syncProgress = 0.96;
-        _syncDetalle = 'Agenda';
-      });
+      // Agenda (filtrada por comercial actual si existe)
+      final prefs = await SharedPreferences.getInstance();
+      final comercialId = prefs.getInt('comercial_id');
+
       _addLog('📥 Descargando agenda...');
-      final prefsAgenda = await SharedPreferences.getInstance();
-      final comercialId = prefsAgenda.getInt('comercial_id');
-      final agendasLista = await apiService.obtenerAgenda(comercialId);
-      if (agendasLista.isNotEmpty && mounted) {
-        final primera = agendasLista[0];
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('DEBUG API'),
-            content: SingleChildScrollView(
-              child: Text(
-                'Primera agenda descargada:\n\n'
-                'ID: ${primera['id']}\n'
-                'asunto: ${primera['asunto']}\n'
-                'fecha_inicio: ${primera['fecha_inicio']}\n'
-                'hora_inicio: "${primera['hora_inicio']}"\n'
-                'hora_fin: "${primera['hora_fin']}"\n'
-                'Length hora_inicio: ${primera['hora_inicio']?.toString().length ?? 0}',
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      }
+      final agenda = await apiService.obtenerAgenda(comercialId);
       await db.limpiarAgenda();
-      await db.insertarAgendasLote(agendasLista.cast<Map<String, dynamic>>());
-      _addLog('✅ ${agendasLista.length} eventos de agenda guardados');
-      // Después de sincronizar agenda, añade:
-      setState(() {
-        _syncProgress = 0.97;
-        _syncDetalle = 'Pedidos';
-      });
+      await db.insertarAgendasLote(agenda.cast<Map<String, dynamic>>());
 
-      // [DENTRO DE _sincronizarDatos en configuracion_screen.dart Y/O main.dart]
-
-      // --- PEDIDOS Y SUS LÍNEAS ---
-      setState(() {
-        _syncProgress = 0.97;
-        _syncDetalle = 'Pedidos';
-      });
-
+      // Pedidos
       _addLog('📥 Descargando pedidos...');
-      final pedidosLista = await apiService.obtenerPedidos();
-      await db.limpiarPedidos(); // Esto ya limpia pedidos Y líneas
-      await db.insertarPedidosLote(pedidosLista.cast<Map<String, dynamic>>());
-      _addLog('✅ ${pedidosLista.length} pedidos guardados');
+      final pedidos = await apiService.obtenerPedidos();
+      await db.limpiarPedidos();
+      await db.insertarPedidosLote(pedidos.cast<Map<String, dynamic>>());
 
-      // Descargar TODAS las líneas de una vez
-      _addLog('📥 Descargando TODAS las líneas de pedido...');
-      final todasLineasPedido = await apiService.obtenerTodasLineasPedido();
+      final lineasPedido = await apiService.obtenerTodasLineasPedido();
       await db.insertarLineasPedidoLote(
-        todasLineasPedido.cast<Map<String, dynamic>>(),
+        lineasPedido.cast<Map<String, dynamic>>(),
       );
-      _addLog('✅ ${todasLineasPedido.length} líneas de pedido guardadas');
 
-      // --- PRESUPUESTOS Y SUS LÍNEAS ---
+      // Presupuestos
+      _addLog('📥 Descargando presupuestos...');
+      final presupuestos = await apiService.obtenerPresupuestos();
+      await db.limpiarPresupuestos();
+      await db.insertarPresupuestosLote(
+        presupuestos.cast<Map<String, dynamic>>(),
+      );
+
+      final lineasPresu = await apiService.obtenerTodasLineasPresupuesto();
+      await db.insertarLineasPresupuestoLote(
+        lineasPresu.cast<Map<String, dynamic>>(),
+      );
+
+      // Tarifas
+      _addLog('📥 Descargando tarifas...');
+      final tarifasCli = await apiService.obtenerTarifasCliente();
+      await db.limpiarTarifasCliente();
+      await db.insertarTarifasClienteLote(
+        tarifasCli.cast<Map<String, dynamic>>(),
+      );
+
+      final tarifasArt = await apiService.obtenerTarifasArticulo();
+      await db.limpiarTarifasArticulo();
+      await db.insertarTarifasArticuloLote(
+        tarifasArt.cast<Map<String, dynamic>>(),
+      );
+
+      // --- 6. NUEVO: Configuración de IVA ---
       setState(() {
-        _syncProgress = 0.98;
-        _syncDetalle = 'Presupuestos';
+        _syncStatus = 'Configurando IVA...';
+        _syncProgress = 0.95;
       });
 
-      _addLog('📥 Descargando presupuestos...');
-      final presupuestosLista = await apiService.obtenerPresupuestos();
-      await db.limpiarPresupuestos(); // Esto ya limpia presupuestos Y líneas
-      await db.insertarPresupuestosLote(
-        presupuestosLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${presupuestosLista.length} presupuestos guardados');
+      _addLog('📥 Descargando IVA desde API...');
+      final configIva = await apiService.obtenerConfiguracionIVA();
 
-      // Descargar TODAS las líneas de una vez
-      _addLog('📥 Descargando TODAS las líneas de presupuesto...');
-      final todasLineasPresupuesto = await apiService
-          .obtenerTodasLineasPresupuesto();
-      await db.insertarLineasPresupuestoLote(
-        todasLineasPresupuesto.cast<Map<String, dynamic>>(),
-      );
-      _addLog(
-        '✅ ${todasLineasPresupuesto.length} líneas de presupuesto guardadas',
-      );
-      // Guardar timestamp de sincronización
-      final prefsSync = await SharedPreferences.getInstance();
-      await prefsSync.setInt(
+      if (configIva.isNotEmpty) {
+        await prefs.setDouble('iva_general', configIva['iva_general']!);
+        await prefs.setDouble('iva_reducido', configIva['iva_reducido']!);
+        await prefs.setDouble(
+          'iva_superreducido',
+          configIva['iva_superreducido']!,
+        );
+        await prefs.setDouble('iva_exento', configIva['iva_exento']!);
+
+        // Recargar clase estática para uso inmediato
+        // Nota: Asegúrate de importar '../models/iva_config.dart'
+        // await IvaConfig.cargarConfiguracion();
+        // (Si no puedes acceder a IvaConfig aquí, se cargará al reiniciar la app o entrar en pantallas)
+        _addLog('✅ IVA actualizado: G=${configIva['iva_general']}%');
+      } else {
+        _addLog('⚠️ No se pudo descargar IVA, usando valores por defecto');
+      }
+
+      // Finalizar
+      await prefs.setInt(
         'ultima_sincronizacion',
         DateTime.now().millisecondsSinceEpoch,
       );
+
       setState(() {
-        _syncProgress = 0.99;
-        _syncDetalle = 'Tarifas';
+        _syncProgress = 1.0;
+        _syncStatus = 'Completado';
+        _syncDetalle = 'Sincronización exitosa';
       });
 
-      _addLog('📥 Descargando tarifas por cliente...');
-      final tarifasClienteLista = await apiService.obtenerTarifasCliente();
-      await db.limpiarTarifasCliente();
-      await db.insertarTarifasClienteLote(
-        tarifasClienteLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${tarifasClienteLista.length} tarifas por cliente guardadas');
+      _addLog('🎉 Sincronización finalizada con éxito');
 
-      _addLog('📥 Descargando tarifas por artículo...');
-      final tarifasArticuloLista = await apiService.obtenerTarifasArticulo();
-      await db.limpiarTarifasArticulo();
-      await db.insertarTarifasArticuloLote(
-        tarifasArticuloLista.cast<Map<String, dynamic>>(),
-      );
-      setState(() {
-        _syncProgress = 1;
-        _syncDetalle = 'Completado';
-      });
-
-      _addLog(
-        '✅ ${tarifasArticuloLista.length} tarifas por artículo guardadas',
-      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '✓ Sincronización completa\n'
-            '${articulosLista.length} artículos\n'
-            '${clientesLista.length} clientes\n'
-            '${comercialesGuardados.length} comerciales\n' // 🟢 Usa la variable correcta
-            '${tiposVisitaLista.length} tipos de visita\n'
-            '${provinciasLista.length} provincias\n'
-            '${zonasLista.length} zonas técnicas\n'
-            '${poblacionesLista.length} poblaciones\n'
-            '${campanasLista.length} campañas\n'
-            '${leadsLista.length} leads\n'
-            '${agendasLista.length} eventos agenda',
-          ),
-          backgroundColor: const Color(0xFF032458),
-          duration: const Duration(seconds: 6),
+        const SnackBar(
+          content: Text('Sincronización completada con éxito'),
+          backgroundColor: Color(0xFF032458),
         ),
       );
     } catch (e) {
-      _addLog('❌ ERROR: $e');
-
+      _addLog('❌ ERROR CRÍTICO: $e');
       setState(() {
         _isSyncing = false;
         _syncStatus = 'Error';
@@ -537,14 +401,12 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       if (!mounted) return;
       showDialog(
         context: context,
-        builder: (dialogContext) => AlertDialog(
+        builder: (ctx) => AlertDialog(
           title: const Text('Error de Sincronización'),
-          content: SingleChildScrollView(
-            child: SelectableText(e.toString().replaceAll('Exception: ', '')),
-          ),
+          content: SingleChildScrollView(child: Text(e.toString())),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
+              onPressed: () => Navigator.pop(ctx),
               child: const Text('Cerrar'),
             ),
           ],
