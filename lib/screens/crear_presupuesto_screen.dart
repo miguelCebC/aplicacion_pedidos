@@ -18,13 +18,40 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
   Map<String, dynamic>? _clienteSeleccionado;
   final _observacionesController = TextEditingController();
   final List<LineaPedidoData> _lineas = [];
+
+  // Variables para Series
+  List<Map<String, dynamic>> _series = [];
+  int? _serieSeleccionadaId;
+
   bool _isLoading = false;
   bool _guardando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarSeries();
+  }
 
   @override
   void dispose() {
     _observacionesController.dispose();
     super.dispose();
+  }
+
+  Future<void> _cargarSeries() async {
+    try {
+      final series = await DatabaseHelper.instance.obtenerSeries(tipo: 'V');
+      if (mounted) {
+        setState(() {
+          _series = series;
+          if (_series.isNotEmpty) {
+            _serieSeleccionadaId = _series[0]['id'];
+          }
+        });
+      }
+    } catch (e) {
+      print('Error cargando series: $e');
+    }
   }
 
   Future<void> _seleccionarCliente() async {
@@ -137,6 +164,13 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
       return;
     }
 
+    if (_serieSeleccionadaId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona una serie de facturación')),
+      );
+      return;
+    }
+
     if (_lineas.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Agrega al menos un artículo')),
@@ -168,6 +202,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
       final presupuestoData = {
         'cliente_id': _clienteSeleccionado!['id'],
         'comercial_id': comercialId,
+        'serie_id': _serieSeleccionadaId,
         'fecha': DateTime.now().toIso8601String(),
         'numero': '',
         'estado': 'P',
@@ -176,11 +211,11 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
         'lineas': _lineas
             .map(
               (linea) => {
-                'art': linea.articulo['id'],
-                'can': linea.cantidad,
-                'pre_ven': linea.precio,
+                'articulo_id': linea.articulo['id'],
+                'cantidad': linea.cantidad,
+                'precio': linea.precio,
                 'por_dto': linea.descuento,
-                'reg_iva_vta': linea.tipoIva, // G/R/S/X para presupuestos
+                'reg_iva_vta': linea.tipoIva,
               },
             )
             .toList(),
@@ -194,6 +229,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
         'id': presupuestoId,
         'cliente_id': _clienteSeleccionado!['id'],
         'comercial_id': comercialId,
+        'serie_id': _serieSeleccionadaId,
         'fecha': DateTime.now().toIso8601String(),
         'numero': '',
         'estado': 'P',
@@ -286,6 +322,43 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+
+                // 🟢 DROPDOWN DE SERIES CORREGIDO
+                if (_series.isNotEmpty)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      child: DropdownButtonFormField<int>(
+                        isExpanded: true, // 🟢 EVITAR OVERFLOW
+                        decoration: const InputDecoration(
+                          labelText: 'Serie de Facturación',
+                          border: InputBorder.none,
+                          icon: Icon(Icons.folder_open, color: Colors.grey),
+                        ),
+                        value: _serieSeleccionadaId,
+                        items: _series.map((serie) {
+                          return DropdownMenuItem<int>(
+                            value: serie['id'],
+                            child: Text(
+                              serie['nombre'],
+                              overflow:
+                                  TextOverflow.ellipsis, // 🟢 CORTAR TEXTO
+                              maxLines: 1,
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _serieSeleccionadaId = value;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                if (_series.isNotEmpty) const SizedBox(height: 16),
 
                 // Observaciones
                 TextField(
@@ -469,7 +542,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
 
                 const SizedBox(height: 16),
 
-                // Card de totales con desglose
+                // Card de totales
                 Card(
                   margin: const EdgeInsets.symmetric(vertical: 16),
                   color: const Color(0xFF032458).withOpacity(0.05),

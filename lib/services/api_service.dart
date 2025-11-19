@@ -564,6 +564,75 @@ class VelneoAPIService {
     }
   }
 
+  Future<List<dynamic>> obtenerSeries() async {
+    try {
+      final allSeries = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+
+      _log('📄 Descargando series...');
+
+      while (true) {
+        final url = _buildUrlWithParams('/SER_M', {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+        });
+
+        _log('  📥 Página $page - URL: $url');
+
+        try {
+          final response = await _getWithSSL(
+            url,
+          ).timeout(const Duration(seconds: 45));
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+
+            if (data['ser_m'] != null && data['ser_m'] is List) {
+              final seriesList = (data['ser_m'] as List).map((serie) {
+                return {
+                  'id': serie['id'],
+                  'nombre': serie['name'] ?? 'Sin nombre',
+                  'tipo':
+                      serie['ser_tip'] ??
+                      '', // 'V' para ventas, 'C' para compras
+                };
+              }).toList();
+
+              if (seriesList.isEmpty) {
+                _log('  🏁 No hay más series');
+                break;
+              }
+
+              allSeries.addAll(seriesList);
+              _log('  ✅ Página $page: ${seriesList.length} series');
+
+              if (seriesList.length < pageSize) break;
+
+              page++;
+              await Future.delayed(const Duration(milliseconds: 200));
+            } else {
+              _log('  ⚠️ No se encontraron series');
+              break;
+            }
+          } else {
+            throw Exception('Error HTTP ${response.statusCode}');
+          }
+        } catch (e) {
+          _log('  ❌ Error en página $page: $e');
+          if (allSeries.isEmpty) rethrow;
+          break;
+        }
+      }
+
+      _log('✅ TOTAL series descargadas: ${allSeries.length}');
+      return allSeries;
+    } catch (e) {
+      _log('❌ Error en obtenerSeries: $e');
+      return [];
+    }
+  }
+
   // Eliminar líneas de pedido (DELETE) - SIN CAMBIOS
   Future<void> eliminarLineasPedido(int pedidoId) async {
     try {
@@ -1586,6 +1655,11 @@ class VelneoAPIService {
         print('📝 Asignando comercial ID: ${pedido['cmr']} al pedido');
       }
 
+      // 🟢 NUEVO: Asignar Serie
+      if (pedido['serie_id'] != null) {
+        pedidoVelneo['ser'] = pedido['serie_id'];
+      }
+
       print('📄 Creando pedido en Velneo: $pedidoVelneo');
 
       final httpClient = HttpClient()
@@ -1649,10 +1723,6 @@ class VelneoAPIService {
               }
             }
           }
-
-          print(
-            '✓ Pedido completado: $lineasOk líneas OK, $lineasError errores',
-          );
 
           return {
             'id': pedidoId,
@@ -1753,6 +1823,11 @@ class VelneoAPIService {
       if (presupuesto['comercial_id'] != null &&
           presupuesto['comercial_id'] != 0) {
         presupuestoVelneo['cmr'] = presupuesto['comercial_id'];
+      }
+
+      // 🟢 NUEVO: Asignar Serie
+      if (presupuesto['serie_id'] != null) {
+        presupuestoVelneo['ser'] = presupuesto['serie_id'];
       }
 
       final jsonData = json.encode(presupuestoVelneo);

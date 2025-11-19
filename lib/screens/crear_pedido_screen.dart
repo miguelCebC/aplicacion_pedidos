@@ -18,13 +18,40 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
   Map<String, dynamic>? _clienteSeleccionado;
   final _observacionesController = TextEditingController();
   final List<LineaPedidoData> _lineas = [];
+
+  // Variables para Series
+  List<Map<String, dynamic>> _series = [];
+  int? _serieSeleccionadaId;
+
   bool _isLoading = false;
   bool _guardando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarSeries();
+  }
 
   @override
   void dispose() {
     _observacionesController.dispose();
     super.dispose();
+  }
+
+  Future<void> _cargarSeries() async {
+    try {
+      final series = await DatabaseHelper.instance.obtenerSeries(tipo: 'V');
+      if (mounted) {
+        setState(() {
+          _series = series;
+          if (_series.isNotEmpty) {
+            _serieSeleccionadaId = _series[0]['id'];
+          }
+        });
+      }
+    } catch (e) {
+      print('Error cargando series: $e');
+    }
   }
 
   Future<void> _seleccionarCliente() async {
@@ -67,7 +94,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
           cantidad: 1,
           precio: precioInfo['precio']!,
           descuento: precioInfo['descuento']!,
-          tipoIva: 'G', // Por defecto General
+          tipoIva: 'G',
         ),
       );
 
@@ -137,6 +164,13 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
       return;
     }
 
+    if (_serieSeleccionadaId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona una serie de facturación')),
+      );
+      return;
+    }
+
     if (_lineas.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Agrega al menos un artículo')),
@@ -167,25 +201,23 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
 
       final pedidoVelneoData = {
         'cliente_id': _clienteSeleccionado!['id'],
+        'cmr': comercialId,
+        'serie_id': _serieSeleccionadaId,
         'fecha': DateTime.now().toIso8601String(),
         'observaciones': _observacionesController.text,
         'total': _calcularTotal(),
         'lineas': _lineas
             .map(
               (linea) => {
-                'art': linea.articulo['id'],
-                'can_ped': linea.cantidad,
-                'pre_ven': linea.precio,
+                'articulo_id': linea.articulo['id'],
+                'cantidad': linea.cantidad,
+                'precio': linea.precio,
                 'por_dto': linea.descuento,
-                'reg_iva_vt_imp_pla': linea.tipoIva, // G/R/S/X para pedidos
+                'reg_iva_vt_imp_pla': linea.tipoIva,
               },
             )
             .toList(),
       };
-
-      if (comercialId != null) {
-        pedidoVelneoData['cmr'] = comercialId;
-      }
 
       final resultado = await apiService
           .crearPedido(pedidoVelneoData)
@@ -198,12 +230,12 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
 
       final pedidoIdVelneo = resultado['id'];
 
-      // Guardar en BD local
       final db = DatabaseHelper.instance;
       await db.insertarPedido({
         'id': pedidoIdVelneo,
         'cliente_id': _clienteSeleccionado!['id'],
         'cmr': comercialId,
+        'serie_id': _serieSeleccionadaId,
         'fecha': DateTime.now().toIso8601String(),
         'observaciones': _observacionesController.text,
         'total': _calcularTotal(),
@@ -297,6 +329,43 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                 ),
                 const SizedBox(height: 16),
 
+                // 🟢 DROPDOWN DE SERIES CORREGIDO (Evita overflow)
+                if (_series.isNotEmpty)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      child: DropdownButtonFormField<int>(
+                        isExpanded: true, // 🟢 ESTA LÍNEA CORRIGE EL OVERFLOW
+                        decoration: const InputDecoration(
+                          labelText: 'Serie de Facturación',
+                          border: InputBorder.none,
+                          icon: Icon(Icons.folder_open, color: Colors.grey),
+                        ),
+                        value: _serieSeleccionadaId,
+                        items: _series.map((serie) {
+                          return DropdownMenuItem<int>(
+                            value: serie['id'],
+                            child: Text(
+                              serie['nombre'],
+                              overflow: TextOverflow
+                                  .ellipsis, // 🟢 CORTAR TEXTO LARGO
+                              maxLines: 1,
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _serieSeleccionadaId = value;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                if (_series.isNotEmpty) const SizedBox(height: 16),
+
                 // Observaciones
                 TextField(
                   controller: _observacionesController,
@@ -356,14 +425,6 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                             style: TextStyle(
                               color: Colors.grey[600],
                               fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Toca "Agregar" para añadir productos',
-                            style: TextStyle(
-                              color: Colors.grey[500],
-                              fontSize: 12,
                             ),
                           ),
                         ],
@@ -436,30 +497,11 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                               itemBuilder: (context) => [
                                 const PopupMenuItem(
                                   value: 'editar',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.edit, size: 20),
-                                      SizedBox(width: 8),
-                                      Text('Editar'),
-                                    ],
-                                  ),
+                                  child: Text('Editar'),
                                 ),
                                 const PopupMenuItem(
                                   value: 'eliminar',
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.delete,
-                                        size: 20,
-                                        color: Colors.red,
-                                      ),
-                                      SizedBox(width: 8),
-                                      Text(
-                                        'Eliminar',
-                                        style: TextStyle(color: Colors.red),
-                                      ),
-                                    ],
-                                  ),
+                                  child: Text('Eliminar'),
                                 ),
                               ],
                               onSelected: (value) {
@@ -479,7 +521,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
 
                 const SizedBox(height: 16),
 
-                // Card de totales con desglose
+                // Card de totales
                 Card(
                   margin: const EdgeInsets.symmetric(vertical: 16),
                   color: const Color(0xFF032458).withOpacity(0.05),

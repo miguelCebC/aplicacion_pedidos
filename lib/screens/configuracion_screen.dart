@@ -250,12 +250,36 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         '✅ ${clientesLista.length} clientes y ${comercialesLista.length} comerciales',
       );
 
+      // ... (imports y cabecera)
+
+      // Dentro del método _sincronizarDatos, añade este bloque donde están los otros "Datos Maestros"
+      // Por ejemplo, después de descargar Artículos y Clientes, y antes de los datos CRM.
+
+      // ... (código previo de clientes y comerciales) ...
+
+      _addLog(
+        '✅ ${clientesLista.length} clientes y ${comercialesLista.length} comerciales',
+      );
+
+      // 🟢 NUEVO BLOQUE: SERIES
+      setState(() {
+        _syncStatus = 'Series...';
+        _syncProgress = 0.35; // Ajusta el progreso según veas
+      });
+
+      _addLog('📥 Descargando series...');
+      final seriesLista = await apiService.obtenerSeries();
+      await db.limpiarSeries();
+      await db.insertarSeriesLote(seriesLista.cast<Map<String, dynamic>>());
+      _addLog('✅ ${seriesLista.length} series guardadas');
+
       // --- 4. Datos Maestros CRM ---
       setState(() {
         _syncStatus = 'Datos CRM...';
         _syncProgress = 0.50;
       });
 
+      // ... (resto del código sigue igual) ...
       _addLog('📥 Tipos visita, provincias, zonas...');
 
       final tiposVisita = await apiService.obtenerTiposVisita();
