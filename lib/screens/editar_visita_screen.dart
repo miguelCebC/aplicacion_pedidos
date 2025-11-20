@@ -719,7 +719,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                           border: InputBorder.none,
                           icon: Icon(Icons.location_on, color: Colors.grey),
                         ),
-                        value: _direccionSeleccionadaId,
+                        initialValue: _direccionSeleccionadaId,
                         items: [
                           const DropdownMenuItem<int?>(
                             value: null,
@@ -734,7 +734,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                                 maxLines: 1,
                               ),
                             );
-                          }).toList(),
+                          }),
                         ],
                         onChanged: (value) {
                           setState(() => _direccionSeleccionadaId = value);

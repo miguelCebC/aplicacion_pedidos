@@ -35,21 +35,28 @@ class DatabaseHelper {
         nombre TEXT NOT NULL,
         email TEXT,
         telefono TEXT,
-        direccion TEXT
+        direccion TEXT,
+        cmr INTEGER,         
+        cif TEXT,            
+        nom_fis TEXT,        
+        nom_com TEXT         
       )
     ''');
 
     await db.execute('''
-      CREATE TABLE articulos (
-        id INTEGER PRIMARY KEY,
-        codigo TEXT NOT NULL,
-        nombre TEXT NOT NULL,
-        descripcion TEXT,
-        precio REAL NOT NULL,
-        stock INTEGER DEFAULT 0
-      )
-    ''');
-
+  CREATE TABLE articulos (
+    id INTEGER PRIMARY KEY,
+    codigo TEXT NOT NULL,
+    nombre TEXT NOT NULL,
+    descripcion TEXT,
+    precio REAL NOT NULL,
+    stock INTEGER DEFAULT 0,
+    img TEXT,  
+    familia TEXT,        
+        proveedor_id INTEGER, 
+        codigo_barras TEXT    
+  )
+''');
     await db.execute('''
       CREATE TABLE usuarios (
         id INTEGER PRIMARY KEY,
@@ -141,7 +148,16 @@ class DatabaseHelper {
         FOREIGN KEY (comercial_id) REFERENCES comerciales (id)
       )
     ''');
-
+    await db.execute('''
+        CREATE TABLE contactos (
+          id INTEGER PRIMARY KEY,
+          cliente_id INTEGER NOT NULL, -- Campo 'ent'
+          tipo TEXT,                   -- Campo 'ctt_clf' (T, E, F)
+          nombre TEXT,                 -- Campo 'name' (TELÉFONO, FAX...)
+          valor TEXT,                  -- Campo 'val' (El número o email)
+          es_principal INTEGER DEFAULT 0 -- Campo 'prn'
+        )
+      ''');
     await db.execute('''
       CREATE TABLE direcciones (
         id INTEGER PRIMARY KEY,
@@ -265,11 +281,17 @@ class DatabaseHelper {
         FOREIGN KEY (articulo_id) REFERENCES articulos (id)
       )
     ''');
-
+    await db.execute('''
+      CREATE TABLE familias (
+        id INTEGER PRIMARY KEY,
+        nombre TEXT NOT NULL
+      )
+    ''');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS tarifas_articulo (
         id INTEGER PRIMARY KEY,
         articulo_id INTEGER NOT NULL,
+        nombre_tarifa TEXT,
         precio REAL NOT NULL,
         por_descuento REAL DEFAULT 0,
         FOREIGN KEY (articulo_id) REFERENCES articulos (id)
@@ -340,6 +362,199 @@ class DatabaseHelper {
     }
 
     await batch.commit(noResult: true);
+  }
+
+  // En lib/database_helper.dart
+  Future<void> insertarFamiliasLote(List<Map<String, dynamic>> familias) async {
+    final db = await database;
+    final batch = db.batch();
+    for (var f in familias) {
+      batch.insert('familias', f, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> limpiarFamilias() async {
+    final db = await database;
+    await db.delete('familias');
+  }
+
+  Future<void> insertarContactosLote(
+    List<Map<String, dynamic>> contactos,
+  ) async {
+    final db = await database;
+    final batch = db.batch();
+
+    // Borramos contactos anteriores para evitar duplicados al resincronizar
+    await db.delete('contactos');
+
+    for (var c in contactos) {
+      batch.insert(
+        'contactos',
+        c,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+
+      // 🟢 TRUCO: Si es principal (prn=1), actualizamos la ficha del cliente
+      // para que salga bien en la rejilla del catálogo sin hacer queries lentas
+      if (c['es_principal'] == 1) {
+        if (c['tipo'] == 'T') {
+          // Teléfono
+          batch.rawUpdate('UPDATE clientes SET telefono = ? WHERE id = ?', [
+            c['valor'],
+            c['cliente_id'],
+          ]);
+        } else if (c['tipo'] == 'E') {
+          // Email
+          batch.rawUpdate('UPDATE clientes SET email = ? WHERE id = ?', [
+            c['valor'],
+            c['cliente_id'],
+          ]);
+        }
+      }
+    }
+    await batch.commit(noResult: true);
+  }
+
+  // 2. Obtener todos los contactos de un cliente (Teléfonos y Emails)
+  Future<List<Map<String, dynamic>>> obtenerContactosPorCliente(
+    int clienteId,
+  ) async {
+    final db = await database;
+    return await db.query(
+      'contactos',
+      where: 'cliente_id = ?',
+      whereArgs: [clienteId],
+      orderBy: 'es_principal DESC, tipo ASC', // Principales primero
+    );
+  }
+
+  // 3. Obtener direcciones de un cliente (Ya tenías la tabla, añadimos el getter filtrado)
+  Future<List<Map<String, dynamic>>> obtenerDireccionesPorCliente(
+    int clienteId,
+  ) async {
+    final db = await database;
+    // Asumiendo que la tabla 'direcciones' tiene un campo 'ent' o 'cliente_id'
+    // Si tu tabla direcciones usa 'ent', cambia 'cliente_id' por 'ent' abajo
+    return await db.query(
+      'direcciones',
+      where: 'ent = ?',
+      whereArgs: [clienteId],
+    );
+  }
+  // En lib/database_helper.dart
+
+  // 🟢 MÉTODO MEJORADO: Busca la familia siendo flexible con el tipo de dato
+  Future<String> obtenerNombreFamilia(String? familiaIdStr) async {
+    if (familiaIdStr == null || familiaIdStr.isEmpty || familiaIdStr == '0') {
+      return 'Sin familia';
+    }
+
+    final db = await database;
+
+    try {
+      // 1. Intentamos buscar asumiendo que el ID es numérico (lo más común en vERP)
+      final idInt = int.tryParse(familiaIdStr);
+
+      if (idInt != null) {
+        final result = await db.query(
+          'familias',
+          columns: ['nombre'],
+          where: 'id = ?',
+          whereArgs: [idInt],
+          limit: 1,
+        );
+        if (result.isNotEmpty) {
+          return result.first['nombre'] as String;
+        }
+      }
+
+      // 2. Si falla o no es número, intentamos buscarlo como Texto (por si acaso)
+      final resultText = await db.query(
+        'familias',
+        columns: ['nombre'],
+        where:
+            'id = ?', // SQLite convierte tipos automáticamente a veces, pero esto fuerza string
+        whereArgs: [familiaIdStr],
+        limit: 1,
+      );
+
+      if (resultText.isNotEmpty) {
+        return resultText.first['nombre'] as String;
+      }
+
+      return 'Familia no encontrada ($familiaIdStr)';
+    } catch (e) {
+      print('Error buscando familia: $e');
+      return 'Error datos';
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> obtenerArticulosPaginados({
+    String? busqueda,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final db = await database;
+
+    String whereClause = 'nombre IS NOT NULL AND nombre != ""';
+    List<dynamic> args = [];
+
+    if (busqueda != null && busqueda.isNotEmpty) {
+      whereClause += ' AND (nombre LIKE ? OR codigo LIKE ?)';
+      args.add('%$busqueda%');
+      args.add('%$busqueda%');
+    }
+
+    return await db.query(
+      'articulos',
+      // 🟢 LISTA BLANCA DE COLUMNAS (Todas menos 'img')
+      columns: [
+        'id',
+        'codigo',
+        'nombre',
+        'descripcion',
+        'precio',
+        'stock',
+        'familia',
+        'proveedor_id',
+        'codigo_barras',
+      ],
+      where: whereClause,
+      whereArgs: args,
+      orderBy: 'nombre',
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  Future<String> obtenerNombreCliente(int id) async {
+    final db = await database;
+    final result = await db.query(
+      'clientes',
+      columns: ['nombre'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (result.isNotEmpty) {
+      return result.first['nombre'] as String;
+    }
+    return 'Proveedor no encontrado';
+  }
+
+  // Método para obtener las tarifas específicas de un artículo
+  Future<List<Map<String, dynamic>>> obtenerTarifasPorArticulo(
+    int articuloId,
+  ) async {
+    final db = await database;
+    // Asegúrate de que la tabla 'tarifas_articulo' exista en tu DB
+    return await db.query(
+      'tarifas_articulo',
+      where: 'articulo_id = ?',
+      whereArgs: [articuloId],
+      orderBy: 'precio DESC', // Opcional: ordenar por precio
+    );
   }
 
   Future<List<Map<String, dynamic>>> obtenerSeries({String? tipo}) async {
@@ -1178,6 +1393,63 @@ class DatabaseHelper {
       };
     }
     return {'precio': pvpBase, 'descuento': 0.0};
+  }
+  // En lib/database_helper.dart
+
+  // 🟢 1. Obtener Clientes Paginados (Para el catálogo)
+  Future<List<Map<String, dynamic>>> obtenerClientesPaginados({
+    String? busqueda,
+    int? comercialId,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final db = await database;
+
+    String whereClause = '1=1';
+    List<dynamic> args = [];
+
+    // Filtro por Comercial
+    if (comercialId != null) {
+      whereClause += ' AND cmr = ?';
+      args.add(comercialId);
+    }
+
+    // Filtro por Búsqueda (Nombre, Email, Teléfono, NIF)
+    if (busqueda != null && busqueda.isNotEmpty) {
+      whereClause +=
+          ' AND (nombre LIKE ? OR email LIKE ? OR telefono LIKE ? OR cif LIKE ?)';
+      args.add('%$busqueda%');
+      args.add('%$busqueda%');
+      args.add('%$busqueda%');
+      args.add('%$busqueda%');
+    }
+
+    return await db.query(
+      'clientes',
+      where: whereClause,
+      whereArgs: args,
+      orderBy: 'nombre',
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  // 🟢 2. Obtener Tarifas Especiales de un Cliente (con nombre del artículo)
+  Future<List<Map<String, dynamic>>> obtenerTarifasPorCliente(
+    int clienteId,
+  ) async {
+    final db = await database;
+    // Hacemos un JOIN para saber el nombre del artículo al que aplica la tarifa
+    return await db.rawQuery(
+      '''
+      SELECT t.*, a.nombre as nombre_articulo, a.codigo as codigo_articulo
+      FROM tarifas_cliente t
+      INNER JOIN articulos a ON t.articulo_id = a.id
+      WHERE t.cliente_id = ?
+      ORDER BY a.nombre
+    ''',
+      [clienteId],
+    );
   }
 
   Future<void> cargarDatosPrueba() async {

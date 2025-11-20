@@ -69,6 +69,10 @@ class VelneoAPIService {
     return 0.0;
   }
 
+  // 🟢 REEMPLAZAR el método obtenerArticulos() completo en lib/services/api_service.dart
+
+  // En lib/services/api_service.dart
+
   Future<List<dynamic>> obtenerArticulos() async {
     try {
       final allArticulos = <dynamic>[];
@@ -76,15 +80,23 @@ class VelneoAPIService {
       const int pageSize = 1000;
       int totalCount = 0;
 
-      print('🛑 Descargando artículos...');
+      _log('📦 Descargando artículos (FORMATO LITERAL)...');
 
       while (true) {
-        final url = _buildUrlWithParams('/ART_M', {
-          'page[number]': page.toString(),
-          'page[size]': pageSize.toString(),
-        });
+        // 🟢 Construimos la URL manualmente como String para que las comas NO se codifiquen
+        // Formato: .../ART_M?fields=id,ref...&api_key=...&page[size]=...
+        final StringBuffer urlBuffer = StringBuffer();
+        urlBuffer.write('$baseUrl/ART_M');
+        urlBuffer.write(
+          '?fields=id,ref,name,pvp,exs,fam,prv,cod_bar',
+        ); // Comas literales
+        urlBuffer.write('&api_key=$apiKey');
+        urlBuffer.write('&page[size]=$pageSize');
+        urlBuffer.write('&page[number]=$page');
 
-        print('  🛑 Página $page - URL: $url');
+        final url = urlBuffer.toString();
+
+        _log('  📄 Página $page - URL: $url');
 
         try {
           final response = await _getWithSSL(
@@ -96,70 +108,60 @@ class VelneoAPIService {
 
             if (data['total_count'] != null) {
               totalCount = data['total_count'];
-              print('  📊 Total registros en servidor: $totalCount');
             }
 
             if (data['art_m'] != null && data['art_m'] is List) {
               final articulosList = data['art_m'] as List;
 
-              if (articulosList.isEmpty) {
-                print('  🛑 No hay más artículos, finalizando');
-                break;
-              }
+              if (articulosList.isEmpty) break;
 
               final articulos = articulosList.map((articulo) {
                 return {
                   'id': articulo['id'],
                   'codigo': articulo['ref'] ?? '',
                   'nombre': articulo['name'] ?? 'Sin nombre',
-                  'descripcion': articulo['name'] ?? 'Sin descripción',
+                  'descripcion': articulo['name'] ?? '',
                   'precio': _convertirADouble(articulo['pvp']),
                   'stock': articulo['exs'] ?? 0,
+                  'img': '', // Vacía para lista rápida
+                  'familia': articulo['fam'] ?? '',
+                  'proveedor_id': articulo['prv'] ?? 0,
+                  'codigo_barras': articulo['cod_bar'] ?? '',
                 };
               }).toList();
 
               allArticulos.addAll(articulos);
-              print(
-                '  ✓ Página $page: ${articulos.length} artículos (Acumulado: ${allArticulos.length}/$totalCount)',
-              );
+              _log('    -> Recibidos ${articulos.length} artículos');
 
-              if (articulos.length < pageSize) {
-                print('  🛑 Última página (${articulos.length} < $pageSize)');
-                break;
-              }
-
-              if (totalCount > 0 && allArticulos.length >= totalCount) {
-                print(
-                  '  🏁 Total alcanzado (${allArticulos.length} >= $totalCount)',
-                );
-                break;
-              }
+              if (articulos.length < pageSize) break;
+              if (totalCount > 0 && allArticulos.length >= totalCount) break;
 
               page++;
-              await Future.delayed(const Duration(milliseconds: 200));
+              await Future.delayed(const Duration(milliseconds: 100));
             } else {
-              print('  🛑 No hay campo art_m en respuesta');
               break;
             }
           } else {
             throw Exception('Error HTTP ${response.statusCode}');
           }
         } catch (e) {
-          print('❌ Error en página $page: $e');
-          if (allArticulos.isEmpty) {
-            rethrow;
-          }
+          _log('❌ Error en página $page: $e');
+          if (allArticulos.isEmpty) rethrow;
           break;
         }
       }
 
-      print('🛑 TOTAL artículos: ${allArticulos.length}');
+      _log('✅ Total artículos descargados: ${allArticulos.length}');
       return allArticulos;
     } catch (e) {
-      print('🛑 Error en obtenerArticulos: $e');
+      _log('❌ Error en obtenerArticulos: $e');
       rethrow;
     }
   }
+
+  // En lib/services/api_service.dart
+
+  // En lib/services/api_service.dart
 
   Future<Map<String, dynamic>> obtenerClientes() async {
     try {
@@ -169,15 +171,24 @@ class VelneoAPIService {
       const int pageSize = 1000;
       int totalCount = 0;
 
-      print('📄 Descargando clientes...');
+      _log('📦 Descargando clientes (OPTIMIZADO y SEPARADO)...');
 
       while (true) {
-        final url = _buildUrlWithParams('/ENT_M', {
-          'page[number]': page.toString(),
-          'page[size]': pageSize.toString(),
-        });
+        final StringBuffer urlBuffer = StringBuffer();
+        String base = baseUrl;
+        if (base.endsWith('/')) base = base.substring(0, base.length - 1);
 
-        print('  📥 Página $page - URL: $url');
+        urlBuffer.write('$base/ENT_M');
+        urlBuffer.write(
+          '?fields=id,nom_fis,eml,tlf,dir,es_cmr,cmr,cif,nom_com,name',
+        );
+        urlBuffer.write('&api_key=$apiKey');
+        urlBuffer.write('&page[size]=$pageSize');
+        urlBuffer.write('&page[number]=$page');
+
+        final url = urlBuffer.toString();
+
+        _log('  📄 Página $page...');
 
         try {
           final response = await _getWithSSL(
@@ -186,80 +197,145 @@ class VelneoAPIService {
 
           if (response.statusCode == 200) {
             final data = json.decode(response.body);
-
-            if (data['total_count'] != null) {
-              totalCount = data['total_count'];
-              print('  📊 Total registros en servidor: $totalCount');
-            }
+            if (data['total_count'] != null) totalCount = data['total_count'];
 
             if (data['ent_m'] != null && data['ent_m'] is List) {
               final entidadesList = data['ent_m'] as List;
 
-              if (entidadesList.isEmpty) {
-                print('  🏁 No hay más registros, finalizando');
-                break;
-              }
+              if (entidadesList.isEmpty) break;
 
+              // ... dentro de obtenerClientes ...
               for (var entidad in entidadesList) {
-                final registro = {
-                  'id': entidad['id'],
-                  'nombre': entidad['nom_fis'] ?? 'Sin nombre',
-                  'email': entidad['eml'] ?? '',
-                  'telefono': entidad['tlf'] ?? '',
-                  'direccion': entidad['dir'] ?? '',
-                };
+                String nombreFinal =
+                    (entidad['nom_fis'] != null &&
+                        entidad['nom_fis'].toString().isNotEmpty)
+                    ? entidad['nom_fis']
+                    : (entidad['name'] ?? 'Sin nombre');
+
+                int cmrSeguro = 0;
+                if (entidad['cmr'] != null) {
+                  cmrSeguro = int.tryParse(entidad['cmr'].toString()) ?? 0;
+                }
 
                 if (entidad['es_cmr'] == true) {
-                  allComerciales.add(registro);
+                  allComerciales.add({
+                    'id': entidad['id'],
+                    'nombre': nombreFinal,
+                    'email': entidad['eml'] ?? '',
+                    'telefono': entidad['tlf'] ?? '',
+                    'direccion': entidad['dir'] ?? '',
+                  });
                 } else {
-                  allClientes.add(registro);
+                  allClientes.add({
+                    'id': entidad['id'],
+                    'nombre': nombreFinal,
+                    'email': entidad['eml'] ?? '',
+                    'telefono': entidad['tlf'] ?? '',
+                    'direccion': entidad['dir'] ?? '',
+                    // 🟢 Guardamos el ID limpio y seguro
+                    'cmr': cmrSeguro,
+                    'cif': entidad['cif'] ?? '',
+                    'nom_fis': entidad['nom_fis'] ?? '',
+                    'nom_com': entidad['nom_com'] ?? '',
+                  });
                 }
               }
+              // ... resto del código
 
-              print(
-                '  ✅ Página $page: ${entidadesList.length} registros (Clientes: ${allClientes.length}, Comerciales: ${allComerciales.length})',
-              );
-
-              if (entidadesList.length < pageSize) {
-                print(
-                  '  🏁 Última página (${entidadesList.length} < $pageSize)',
-                );
-                break;
-              }
-
+              if (entidadesList.length < pageSize) break;
               if (totalCount > 0 &&
-                  (allClientes.length + allComerciales.length) >= totalCount) {
-                print(
-                  '  🏁 Total alcanzado (${allClientes.length + allComerciales.length} >= $totalCount)',
-                );
+                  (allClientes.length + allComerciales.length) >= totalCount)
                 break;
-              }
-
               page++;
-              await Future.delayed(const Duration(milliseconds: 200));
+              await Future.delayed(const Duration(milliseconds: 100));
             } else {
-              print('  🏁 No hay campo ent_m en respuesta');
               break;
             }
           } else {
             throw Exception('Error HTTP ${response.statusCode}');
           }
         } catch (e) {
-          print('❌ Error en página $page: $e');
-          if (allClientes.isEmpty && allComerciales.isEmpty) {
-            rethrow;
-          }
+          if (allClientes.isEmpty && allComerciales.isEmpty) rethrow;
           break;
         }
       }
 
-      print('✅ TOTAL clientes: ${allClientes.length}');
-      print('✅ TOTAL comerciales: ${allComerciales.length}');
-
+      _log(
+        '✅ Clientes: ${allClientes.length} | Comerciales: ${allComerciales.length}',
+      );
       return {'clientes': allClientes, 'comerciales': allComerciales};
     } catch (e) {
-      print('❌ Error en obtenerClientes: $e');
+      _log('❌ Error en obtenerClientes: $e');
       rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>?> obtenerDetalleArticulo(int id) async {
+    try {
+      // 1. Construcción MANUAL de la URL para asegurar el formato exacto
+      // Formato deseado: .../ART_M/1234?fields=id,img&api_key=...
+      final StringBuffer urlBuffer = StringBuffer();
+
+      // Aseguramos que no haya doble barra // entre base y endpoint
+      String base = baseUrl;
+      if (base.endsWith('/')) base = base.substring(0, base.length - 1);
+
+      urlBuffer.write('$base/ART_M/$id');
+      urlBuffer.write('?fields=id,img'); // 🟢 Coma literal, sin codificar
+      urlBuffer.write('&api_key=$apiKey');
+
+      final url = urlBuffer.toString();
+
+      // 🕵️ LOG DE DEBUG: LA LLAMADA
+      print('🚀 [DEBUG API] Request URL: $url');
+
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
+
+      // 🕵️ LOG DE DEBUG: LA RESPUESTA
+      print('📩 [DEBUG API] Status Code: ${response.statusCode}');
+      print(
+        '📦 [DEBUG API] Body (primeros 200 chars): ${response.body.length > 200 ? response.body.substring(0, 200) : response.body}',
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        // Lógica de parsing robusta (por si devuelve objeto o lista)
+        Map<String, dynamic>? articuloRaw;
+
+        if (data is Map<String, dynamic>) {
+          // Caso A: Devuelve objeto directo { "id": ... }
+          // A veces Velneo devuelve el objeto directo si se pide por ID
+          if (data.containsKey('id')) {
+            articuloRaw = data;
+          }
+          // Caso B: Devuelve envuelto en { "art_m": [ ... ] }
+          else if (data['art_m'] != null && data['art_m'] is List) {
+            final lista = data['art_m'] as List;
+            if (lista.isNotEmpty) articuloRaw = lista[0];
+          }
+        }
+
+        if (articuloRaw != null) {
+          print(
+            '✅ [DEBUG API] Imagen encontrada: ${articuloRaw['img'] != null ? "SÍ (${articuloRaw['img'].toString().length} chars)" : "NO"}',
+          );
+
+          return {'id': articuloRaw['id'], 'img': articuloRaw['img'] ?? ''};
+        } else {
+          print(
+            '⚠️ [DEBUG API] No se pudo extraer el objeto articulo del JSON',
+          );
+        }
+      } else {
+        print('❌ [DEBUG API] Error del servidor: ${response.statusCode}');
+      }
+      return null;
+    } catch (e) {
+      print('❌ [DEBUG API] Excepción: $e');
+      return null;
     }
   }
 
@@ -363,6 +439,72 @@ class VelneoAPIService {
     } catch (e) {
       _log('❌ Error en obtenerPedidos: $e');
       rethrow;
+    }
+  }
+  // En lib/services/api_service.dart
+
+  // 🟢 MÉTODO NUEVO: Descargar Contactos
+  Future<List<Map<String, dynamic>>> obtenerContactos() async {
+    try {
+      final allContactos = <Map<String, dynamic>>[];
+      int page = 1;
+      const int pageSize = 1000;
+
+      _log('📦 Descargando contactos (Teléfonos/Emails)...');
+
+      while (true) {
+        // Endpoint /CTT_M (Tabla de contactos)
+        final url = _buildUrlWithParams('/CTT_M', {
+          'fields': 'id,ent,ctt_clf,val,prn,name', // Campos necesarios
+          'page[size]': '$pageSize',
+          'page[number]': '$page',
+        });
+
+        _log('  📄 Página $page...');
+
+        final response = await _getWithSSL(
+          url,
+        ).timeout(const Duration(seconds: 45));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+
+          if (data['ctt_m'] != null && data['ctt_m'] is List) {
+            final lista = data['ctt_m'] as List;
+            if (lista.isEmpty) break;
+
+            for (var c in lista) {
+              allContactos.add({
+                'id': c['id'],
+                'cliente_id': c['ent'] ?? 0,
+                'tipo': c['ctt_clf'] ?? '', // T=Tel, E=Email, F=Fax
+                'nombre': c['name'] ?? '',
+                'valor': c['val'] ?? '',
+                // Convertimos "1" string a 1 entero
+                'es_principal': (c['prn'] != null && c['prn'].toString() == '1')
+                    ? 1
+                    : 0,
+              });
+            }
+
+            if (lista.length < pageSize) break;
+            page++;
+            await Future.delayed(const Duration(milliseconds: 100));
+          } else {
+            break;
+          }
+        } else {
+          // Si falla (ej: no existe el endpoint) salimos para no bloquear
+          _log('⚠️ Error descargando contactos: ${response.statusCode}');
+          break;
+        }
+      }
+
+      _log('✅ Total contactos descargados: ${allContactos.length}');
+      return allContactos;
+    } catch (e) {
+      _log('❌ Error en obtenerContactos: $e');
+      return []; // Retornamos vacío para no romper la sincronización global
     }
   }
 
@@ -2436,6 +2578,11 @@ class VelneoAPIService {
                 return {
                   'id': tarifa['id'],
                   'articulo_id': tarifa['art'] ?? 0,
+                  // 🟢 Mapear nombre tarifa si viene en el JSON (ej: 'tar_name' o 'nom')
+                  'nombre_tarifa':
+                      tarifa['tar_name'] ??
+                      tarifa['nom'] ??
+                      'Tarifa ${tarifa['tar'] ?? ''}',
                   'precio': _convertirADouble(tarifa['pre']),
                   'por_descuento': _convertirADouble(tarifa['por_dto']),
                 };
@@ -2486,6 +2633,54 @@ class VelneoAPIService {
     } catch (e) {
       _log('❌ Error en obtenerTarifasArticulo: $e');
       return [];
+    }
+  }
+  // ... dentro de la clase VelneoAPIService ...
+
+  Future<List<dynamic>> obtenerFamilias() async {
+    try {
+      print('📄 Descargando familias...');
+      final allFamilias = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+
+      while (true) {
+        final url = _buildUrlWithParams('/FAM_M', {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+        });
+
+        final response = await _getWithSSL(
+          url,
+        ).timeout(const Duration(seconds: 30));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+
+          if (data['fam_m'] != null && data['fam_m'] is List) {
+            final lista = (data['fam_m'] as List).map((fam) {
+              return {
+                'id': fam['id'],
+                'nombre': fam['name'] ?? fam['nom'] ?? 'Sin nombre',
+              };
+            }).toList();
+
+            if (lista.isEmpty) break;
+            allFamilias.addAll(lista);
+            if (lista.length < pageSize) break;
+            page++;
+          } else {
+            break;
+          }
+        } else {
+          throw Exception('Error HTTP ${response.statusCode}');
+        }
+      }
+      print('✅ Familias descargadas: ${allFamilias.length}');
+      return allFamilias;
+    } catch (e) {
+      print('❌ Error en obtenerFamilias: $e');
+      return []; // Retornar vacío en caso de error para no bloquear sync
     }
   }
 

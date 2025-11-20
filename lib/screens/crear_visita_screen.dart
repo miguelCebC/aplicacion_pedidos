@@ -676,7 +676,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                         border: InputBorder.none,
                         icon: Icon(Icons.location_on, color: Colors.grey),
                       ),
-                      value: _direccionSeleccionadaId,
+                      initialValue: _direccionSeleccionadaId,
                       items: [
                         const DropdownMenuItem<int?>(
                           value: null,
@@ -691,7 +691,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                               maxLines: 1,
                             ),
                           );
-                        }).toList(),
+                        }),
                       ],
                       onChanged: (value) {
                         setState(() => _direccionSeleccionadaId = value);

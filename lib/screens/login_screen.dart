@@ -87,34 +87,28 @@ class _LoginScreenState extends State<LoginScreen> {
       String serverUrl = _serverUrlController.text.trim();
       final apiVersion = _apiVersionController.text.trim();
 
-      // Asegurar que no termine con /
       if (serverUrl.endsWith('/')) {
         serverUrl = serverUrl.substring(0, serverUrl.length - 1);
       }
 
-      // Remover versión si ya está en la URL
       if (serverUrl.endsWith('/v1') ||
           serverUrl.endsWith('/v2') ||
           serverUrl.endsWith('/v3')) {
         serverUrl = serverUrl.substring(0, serverUrl.lastIndexOf('/'));
       }
 
-      // Añadir versión
       final fullUrl = '$serverUrl/$apiVersion';
 
-      // Asegurar protocolo
       String finalUrl = fullUrl;
       if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
         finalUrl = 'https://$finalUrl';
       }
 
-      // LÍNEAS A CAMBIAR:
-
       _addLog('🌐 Conectando a: $finalUrl');
       final apiKey = _apiKeyController.text.trim();
       final apiService = VelneoAPIService(finalUrl, apiKey);
 
-      // 1. Descargar comerciales primero
+      // 1. Descargar comerciales
       setState(() => _statusMessage = 'Descargando comerciales...');
       _addLog('📥 Descargando lista de comerciales desde API');
 
@@ -130,7 +124,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       _addLog('💾 Comerciales guardados en base de datos local');
 
-      // 2. Buscar el comercial en la BD local
+      // 2. Validar comercial
       setState(() => _statusMessage = 'Validando comercial ID $comercialId...');
       _addLog('🔍 Buscando comercial ID $comercialId en base de datos local');
 
@@ -143,18 +137,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
       _addLog('✅ Comercial encontrado: ${comercial['nombre']}');
 
-      // 3. Descargar usuarios de app
+      // 3. Descargar usuarios
       setState(() => _statusMessage = 'Descargando usuarios de app...');
       _addLog('📥 Descargando usuarios desde API');
 
       final usuariosLista = await apiService.obtenerTodosUsuarios();
       _addLog('📊 Total usuarios descargados: ${usuariosLista.length}');
 
-      // Guardar usuarios en BD local (necesitarás crear esta tabla)
       await db.insertarUsuariosLote(usuariosLista.cast<Map<String, dynamic>>());
       _addLog('💾 Usuarios guardados en base de datos local');
 
-      // 4. Buscar usuario asociado al comercial en BD local
+      // 4. Buscar usuario asociado
       setState(() => _statusMessage = 'Buscando usuario de app...');
       _addLog('🔍 Buscando usuario para comercial ID $comercialId en BD local');
 
@@ -170,14 +163,13 @@ class _LoginScreenState extends State<LoginScreen> {
         '✅ Usuario de app encontrado: ${usuario['name']} (ID: $usuarioAppId)',
       );
 
-      // 5. Descargar relaciones usr_apl
+      // 5. Validar acceso
       setState(() => _statusMessage = 'Validando acceso a la aplicación...');
       _addLog('📥 Descargando permisos de aplicación');
 
       final usrAplLista = await apiService.obtenerTodosUsrApl();
       _addLog('📊 Total registros usr_apl descargados: ${usrAplLista.length}');
 
-      // 6. Verificar acceso en la lista descargada
       _addLog(
         '🔐 Verificando acceso del usuario $usuarioAppId al código de app $codigoApp',
       );
@@ -190,15 +182,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!tieneAcceso) {
         _addLog('❌ Usuario no tiene acceso a esta aplicación');
-        _addLog(
-          '💡 No existe registro usr_apl con usr_m=$usuarioAppId y apl_tec=$codigoApp',
-        );
         throw Exception('Este usuario no tiene acceso a la aplicación.');
       }
 
       _addLog('✅ Acceso validado correctamente');
-      _addLog('✅ Acceso validado correctamente');
-      // Línea 150-156 - Guardar también el ID del usuario de app:
+
       // Guardar configuración
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('velneo_url', finalUrl);
@@ -213,7 +201,6 @@ class _LoginScreenState extends State<LoginScreen> {
       // Sincronizar todos los datos
       await _sincronizarDatos(apiService, comercialId);
 
-      // Navegar a home
       if (!mounted) return;
 
       Navigator.of(context).pushReplacement(
@@ -229,7 +216,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
-      // Mostrar diálogo con TODOS los logs
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -297,6 +283,21 @@ class _LoginScreenState extends State<LoginScreen> {
         articulosLista.cast<Map<String, dynamic>>(),
       );
       _addLog('✅ ${articulosLista.length} artículos guardados');
+
+      // 🟢 NUEVO: Descargar Familias
+      setState(() => _statusMessage = 'Descargando familias...');
+      _addLog('📥 Descargando familias...');
+      try {
+        final familiasLista = await apiService.obtenerFamilias();
+        await db.limpiarFamilias();
+        await db.insertarFamiliasLote(
+          familiasLista.cast<Map<String, dynamic>>(),
+        );
+        _addLog('✅ ${familiasLista.length} familias guardadas');
+      } catch (e) {
+        _addLog('⚠️ Error descargando familias (no crítico): $e');
+      }
+      // ----------------------------------------------------
 
       // Clientes y Comerciales
       setState(() => _statusMessage = 'Descargando clientes...');
@@ -420,187 +421,182 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: _isLoading
-            ? Column(
-                children: [
-                  Expanded(
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const CircularProgressIndicator(
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Color(0xFF032458),
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          Text(
-                            _statusMessage,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Container(
-                    height: 200,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      border: Border(top: BorderSide(color: Colors.grey[300]!)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Log de Sincronización',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                        const Divider(),
-                        Expanded(
-                          child: ListView.builder(
-                            reverse: true,
-                            itemCount: _logMessages.length,
-                            itemBuilder: (context, index) {
-                              final reversedIndex =
-                                  _logMessages.length - 1 - index;
-                              return Text(
-                                _logMessages[reversedIndex],
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontFamily: 'monospace',
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              )
-            : SingleChildScrollView(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const SizedBox(height: 40),
-                    // Logo o título
-                    const Icon(
-                      Icons.business_center,
-                      size: 80,
-                      color: Color(0xFF032458),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'CRM Velneo',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF032458),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Configuración Inicial',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 48),
-                    TextField(
-                      controller: _codigoAppController,
-                      decoration: const InputDecoration(
-                        labelText: 'Código de App *',
-                        hintText: 'Código único de aplicación',
-                        prefixIcon: Icon(Icons.smartphone),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // ID Comercial
-                    TextField(
-                      controller: _comercialIdController,
-                      decoration: const InputDecoration(
-                        labelText: 'ID del Comercial *',
-                        hintText: 'Ej: 123',
-                        prefixIcon: Icon(Icons.person),
-                        border: OutlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.number,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // URL Servidor
-                    TextField(
-                      controller: _serverUrlController,
-                      decoration: const InputDecoration(
-                        labelText: 'URL del Servidor *',
-                        hintText: 'servidor:puerto/ruta',
-                        helperText: 'Sin versión (v1, v2, etc.)',
-                        prefixIcon: Icon(Icons.dns),
-                        border: OutlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.url,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Versión API
-                    TextField(
-                      controller: _apiVersionController,
-                      decoration: const InputDecoration(
-                        labelText: 'Versión de la API *',
-                        hintText: 'v1, v2, v3...',
-                        prefixIcon: Icon(Icons.api),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // API Key
-                    TextField(
-                      controller: _apiKeyController,
-                      decoration: const InputDecoration(
-                        labelText: 'API Key *',
-                        hintText: 'Ingrese su clave API',
-                        prefixIcon: Icon(Icons.vpn_key),
-                        border: OutlineInputBorder(),
-                      ),
-                      obscureText: true,
-                    ),
-                    const SizedBox(height: 32),
-
-                    // Botón de inicio
-                    ElevatedButton(
-                      onPressed: _iniciarSesion,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF032458),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+    if (_isLoading) {
+      return Scaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0xFF032458),
                         ),
                       ),
-                      child: const Text(
-                        'INICIAR SESIÓN',
-                        style: TextStyle(
+                      const SizedBox(height: 24),
+                      Text(
+                        _statusMessage,
+                        style: const TextStyle(
                           fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
                         ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Container(
+                height: 200,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  border: Border(top: BorderSide(color: Colors.grey[300]!)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Log de Sincronización',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const Divider(),
+                    Expanded(
+                      child: ListView.builder(
+                        reverse: true,
+                        itemCount: _logMessages.length,
+                        itemBuilder: (context, index) {
+                          final reversedIndex = _logMessages.length - 1 - index;
+                          return Text(
+                            _logMessages[reversedIndex],
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontFamily: 'monospace',
+                            ),
+                          );
+                        },
                       ),
                     ),
                   ],
                 ),
               ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 40),
+              const Icon(
+                Icons.business_center,
+                size: 80,
+                color: Color(0xFF032458),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'CRM Velneo',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF032458),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Configuración Inicial',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+              const SizedBox(height: 48),
+              TextField(
+                controller: _codigoAppController,
+                decoration: const InputDecoration(
+                  labelText: 'Código de App *',
+                  hintText: 'Código único de aplicación',
+                  prefixIcon: Icon(Icons.smartphone),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _comercialIdController,
+                decoration: const InputDecoration(
+                  labelText: 'ID del Comercial *',
+                  hintText: 'Ej: 123',
+                  prefixIcon: Icon(Icons.person),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _serverUrlController,
+                decoration: const InputDecoration(
+                  labelText: 'URL del Servidor *',
+                  hintText: 'servidor:puerto/ruta',
+                  helperText: 'Sin versión (v1, v2, etc.)',
+                  prefixIcon: Icon(Icons.dns),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _apiVersionController,
+                decoration: const InputDecoration(
+                  labelText: 'Versión de la API *',
+                  hintText: 'v1, v2, v3...',
+                  prefixIcon: Icon(Icons.api),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _apiKeyController,
+                decoration: const InputDecoration(
+                  labelText: 'API Key *',
+                  hintText: 'Ingrese su clave API',
+                  prefixIcon: Icon(Icons.vpn_key),
+                  border: OutlineInputBorder(),
+                ),
+                obscureText: true,
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton(
+                onPressed: _iniciarSesion,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF032458),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'INICIAR SESIÓN',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
