@@ -20,7 +20,7 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
   Map<String, dynamic>? _campana;
   Map<String, dynamic>? _lead;
   bool _isLoading = true;
-
+  Map<String, dynamic>? _direccion;
   @override
   void initState() {
     super.initState();
@@ -68,7 +68,15 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
         },
       );
     }
-
+    // Cargar dirección si existe
+    if (widget.visita['direccion_id'] != null &&
+        widget.visita['direccion_id'] != 0) {
+      final direcciones = await db.obtenerDirecciones();
+      _direccion = direcciones.firstWhere(
+        (d) => d['id'] == widget.visita['direccion_id'],
+        orElse: () => {},
+      );
+    }
     // Cargar lead
     if (widget.visita['lead_id'] != null && widget.visita['lead_id'] != 0) {
       final leads = await db.obtenerLeads();
@@ -328,6 +336,11 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
                               widget.visita['asunto'] ?? 'Sin asunto',
                             ),
                             _buildInfoRow('Tipo', tipoVisita),
+                            if (_direccion != null)
+                              _buildInfoRow(
+                                'Dirección',
+                                _direccion!['direccion'] ?? 'Sin dirección',
+                              ),
                             if (widget.visita['sincronizado'] == 1)
                               const Row(
                                 children: [
