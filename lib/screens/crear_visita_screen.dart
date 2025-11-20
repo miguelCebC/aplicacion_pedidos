@@ -68,6 +68,17 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     });
   }
 
+  Future<void> _cargarDireccionesCliente(int clienteId) async {
+    final db = DatabaseHelper.instance;
+    final direcciones = await db.obtenerDirecciones(ent: clienteId);
+    setState(() {
+      _direccionesFiltradas = direcciones;
+      _direccionSeleccionadaId = direcciones.isNotEmpty
+          ? direcciones.first['id']
+          : null;
+    });
+  }
+
   Future<void> _seleccionarCliente() async {
     final cliente = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -112,19 +123,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         }
       });
     }
-  }
-
-  Future<void> _cargarDireccionesCliente(int clienteId) async {
-    final dirs = await DatabaseHelper.instance.obtenerDirecciones(
-      ent: clienteId,
-    );
-    setState(() {
-      _direccionesFiltradas = dirs;
-      _direccionSeleccionadaId = null;
-      if (dirs.isNotEmpty) {
-        _direccionSeleccionadaId = dirs[0]['id'];
-      }
-    });
   }
 
   Future<void> _seleccionarHora(bool esInicio, {bool esProxima = false}) async {
@@ -663,6 +661,43 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                   onChanged: (value) {
                     setState(() => _campanaSeleccionada = value);
                   },
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                    child: DropdownButtonFormField<int?>(
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Dirección (opcional)',
+                        border: InputBorder.none,
+                        icon: Icon(Icons.location_on, color: Colors.grey),
+                      ),
+                      value: _direccionSeleccionadaId,
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Sin dirección'),
+                        ),
+                        ..._direccionesFiltradas.map((dir) {
+                          return DropdownMenuItem<int?>(
+                            value: dir['id'],
+                            child: Text(
+                              dir['direccion'],
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          );
+                        }).toList(),
+                      ],
+                      onChanged: (value) {
+                        setState(() => _direccionSeleccionadaId = value);
+                      },
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 SwitchListTile(

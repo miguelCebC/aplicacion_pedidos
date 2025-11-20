@@ -32,7 +32,8 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
   bool _isLoading = false;
   bool _datosListos = false;
   bool _guardando = false;
-
+  List<Map<String, dynamic>> _direccionesFiltradas = [];
+  int? _direccionSeleccionadaId;
   // ==================================================
   // == 🟢 1. "VISITA CERRADA" AÑADIDO ==
   // ==================================================
@@ -130,7 +131,13 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
       );
       _clienteSeleccionado = cliente;
     }
+    // 🟢 Cargar direcciones del cliente
+    _cargarDireccionesCliente(_clienteSeleccionado!['id']);
 
+    // 🟢 Establecer dirección actual si existe
+    _direccionSeleccionadaId = widget.visita['direccion_id'] == 0
+        ? null
+        : widget.visita['direccion_id'];
     setState(() {
       _comercialId = prefs.getInt('comercial_id');
       _tiposVisita = tiposVisita;
@@ -155,6 +162,17 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
       }
 
       _datosListos = true;
+    });
+  }
+
+  Future<void> _cargarDireccionesCliente(int clienteId) async {
+    final db = DatabaseHelper.instance;
+    final direcciones = await db.obtenerDirecciones(ent: clienteId);
+    setState(() {
+      _direccionesFiltradas = direcciones;
+      if (_direccionSeleccionadaId == null && direcciones.isNotEmpty) {
+        _direccionSeleccionadaId = direcciones.first['id'];
+      }
     });
   }
 
@@ -364,6 +382,7 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
         'asunto': _asuntoController.text,
         'comercial_id': _comercialId,
         'campana_id': _campanaSeleccionada ?? 0,
+        'direccion_id': _direccionSeleccionadaId ?? 0,
         'fecha_inicio': fechaHoraInicio.toIso8601String(),
         'hora_inicio': horaInicioStr,
         'fecha_fin': fechaHoraFin.toIso8601String(),
@@ -685,6 +704,44 @@ class _EditarVisitaScreenState extends State<EditarVisitaScreen> {
                     setState(() => _campanaSeleccionada = value);
                   },
                 ),
+                const SizedBox(height: 16),
+                if (_direccionesFiltradas.isNotEmpty)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      child: DropdownButtonFormField<int?>(
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Dirección (opcional)',
+                          border: InputBorder.none,
+                          icon: Icon(Icons.location_on, color: Colors.grey),
+                        ),
+                        value: _direccionSeleccionadaId,
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('Sin dirección'),
+                          ),
+                          ..._direccionesFiltradas.map((dir) {
+                            return DropdownMenuItem<int?>(
+                              value: dir['id'],
+                              child: Text(
+                                dir['direccion'],
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            );
+                          }).toList(),
+                        ],
+                        onChanged: (value) {
+                          setState(() => _direccionSeleccionadaId = value);
+                        },
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 16),
                 SwitchListTile(
                   title: const Text('Todo el día'),
