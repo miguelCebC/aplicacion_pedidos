@@ -338,7 +338,7 @@ class _CrearPresupuestoScreenState extends State<CrearPresupuestoScreen> {
                           border: InputBorder.none,
                           icon: Icon(Icons.folder_open, color: Colors.grey),
                         ),
-                        value: _serieSeleccionadaId,
+                        initialValue: _serieSeleccionadaId,
                         items: _series.map((serie) {
                           return DropdownMenuItem<int>(
                             value: serie['id'],

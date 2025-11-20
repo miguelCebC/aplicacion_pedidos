@@ -272,7 +272,17 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       await db.limpiarSeries();
       await db.insertarSeriesLote(seriesLista.cast<Map<String, dynamic>>());
       _addLog('✅ ${seriesLista.length} series guardadas');
-
+      setState(() {
+        _syncStatus = 'Direcciones...';
+        _syncProgress = 0.45;
+      });
+      _addLog('📥 Descargando direcciones...');
+      final direcciones = await apiService.obtenerDirecciones();
+      await db.limpiarDirecciones();
+      await db.insertarDireccionesLote(
+        direcciones.cast<Map<String, dynamic>>(),
+      );
+      _addLog('✅ ${direcciones.length} direcciones guardadas');
       // --- 4. Datos Maestros CRM ---
       setState(() {
         _syncStatus = 'Datos CRM...';

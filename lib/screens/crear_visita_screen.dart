@@ -17,7 +17,8 @@ class CrearVisitaScreen extends StatefulWidget {
 class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   final _asuntoController = TextEditingController();
   final _descripcionController = TextEditingController();
-
+  List<Map<String, dynamic>> _direccionesFiltradas = [];
+  int? _direccionSeleccionadaId;
   Map<String, dynamic>? _clienteSeleccionado;
   int? _comercialId;
   int? _tipoVisita;
@@ -67,13 +68,15 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     });
   }
 
-  void _seleccionarCliente() async {
+  Future<void> _seleccionarCliente() async {
     final cliente = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (dialogContext) => const BuscarClienteDialog(),
+      builder: (_) => const BuscarClienteDialog(),
     );
     if (cliente != null) {
       setState(() => _clienteSeleccionado = cliente);
+      // 🟢 Llamada nueva
+      _cargarDireccionesCliente(cliente['id']);
     }
   }
 
@@ -109,6 +112,19 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         }
       });
     }
+  }
+
+  Future<void> _cargarDireccionesCliente(int clienteId) async {
+    final dirs = await DatabaseHelper.instance.obtenerDirecciones(
+      ent: clienteId,
+    );
+    setState(() {
+      _direccionesFiltradas = dirs;
+      _direccionSeleccionadaId = null;
+      if (dirs.isNotEmpty) {
+        _direccionSeleccionadaId = dirs[0]['id'];
+      }
+    });
   }
 
   Future<void> _seleccionarHora(bool esInicio, {bool esProxima = false}) async {
@@ -302,6 +318,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         'hora_proxima_visita': null, // Se gestiona manualmente
         'no_gen_pro_vis': noGenProVis, // <-- true
         'no_gen_tri': noGenTri, // <-- true
+        'direccion_id': _direccionSeleccionadaId ?? 0,
       };
 
       // ==================================================

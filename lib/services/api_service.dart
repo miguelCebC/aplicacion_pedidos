@@ -379,8 +379,9 @@ class VelneoAPIService {
       };
 
       if (pedido['cmr'] != null) pedidoVelneo['cmr'] = pedido['cmr'];
-      if (pedido['observaciones'] != null)
+      if (pedido['observaciones'] != null) {
         pedidoVelneo['obs'] = pedido['observaciones'];
+      }
 
       print('📝 Actualizando pedido #$pedidoId en Velneo');
 
@@ -1919,17 +1920,60 @@ class VelneoAPIService {
     }
   }
 
+  Future<List<dynamic>> obtenerDirecciones() async {
+    try {
+      final allDirecciones = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+
+      _log('📄 Descargando direcciones...');
+
+      while (true) {
+        final url = _buildUrlWithParams('/DIR_M', {
+          'page[number]': page.toString(),
+          'page[size]': pageSize.toString(),
+        });
+
+        final response = await _getWithSSL(
+          url,
+        ).timeout(const Duration(seconds: 45));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data['dir_m'] != null && data['dir_m'] is List) {
+            final lista = (data['dir_m'] as List).map((d) {
+              return {
+                'id': d['id'],
+                'ent': d['ent'], // ID del cliente
+                'direccion': d['dir_ver'] ?? d['dir'] ?? 'Sin dirección',
+              };
+            }).toList();
+
+            if (lista.isEmpty) break;
+            allDirecciones.addAll(lista);
+            if (lista.length < pageSize) break;
+            page++;
+          } else {
+            break;
+          }
+        } else {
+          throw Exception('Error HTTP ${response.statusCode}');
+        }
+      }
+      _log('✅ Direcciones descargadas: ${allDirecciones.length}');
+      return allDirecciones;
+    } catch (e) {
+      _log('❌ Error obtenerDirecciones: $e');
+      return [];
+    }
+  }
+
   Future<Map<String, dynamic>> crearVisitaAgenda(
     Map<String, dynamic> visita,
   ) async {
     final httpClient = HttpClient()
-      ..badCertificateCallback =
-          ((X509Certificate cert, String host, int port) => true)
-      ..connectionTimeout = const Duration(seconds: 30);
-
+      ..badCertificateCallback = ((c, h, p) => true);
     try {
-      DebugLogger.log('📝 API: Creando visita "${visita['asunto']}"');
-
       final visitaVelneo = {
         'cli': visita['cliente_id'],
         'tip_vis': visita['tipo_visita'],
@@ -1942,84 +1986,43 @@ class VelneoAPIService {
         'no_gen_pro_vis': visita['no_gen_pro_vis'] ?? false,
       };
 
-      if (visita['hora_inicio'] != null &&
-          visita['hora_inicio'].toString().isNotEmpty) {
+      if (visita['hora_inicio'] != null) {
         visitaVelneo['hor_ini'] = visita['hora_inicio'];
       }
-      if (visita['fecha_fin'] != null &&
-          visita['fecha_fin'].toString().isNotEmpty) {
+      if (visita['fecha_fin'] != null) {
         visitaVelneo['fch_fin'] = visita['fecha_fin'];
       }
-      if (visita['hora_fin'] != null &&
-          visita['hora_fin'].toString().isNotEmpty) {
+      if (visita['hora_fin'] != null) {
         visitaVelneo['hor_fin'] = visita['hora_fin'];
       }
-      if (visita['fecha_proxima_visita'] != null &&
-          visita['fecha_proxima_visita'].toString().isNotEmpty) {
-        visitaVelneo['fch_pro_vis'] = visita['fecha_proxima_visita'];
-      }
-      if (visita['hora_proxima_visita'] != null &&
-          visita['hora_proxima_visita'].toString().isNotEmpty) {
-        visitaVelneo['hor_pro_vis'] = visita['hora_proxima_visita'];
-      }
-      if (visita['campana_id'] != null && visita['campana_id'] != 0) {
+      if (visita['campana_id'] != 0) {
         visitaVelneo['crm_cam_com'] = visita['campana_id'];
       }
-      if (visita['lead_id'] != null && visita['lead_id'] != 0) {
-        visitaVelneo['crm_lea'] = visita['lead_id'];
+
+      // 🟢 NUEVO: Enviar Dirección
+      if (visita['direccion_id'] != null && visita['direccion_id'] != 0) {
+        visitaVelneo['dir'] = visita['direccion_id'];
       }
 
-      DebugLogger.log('📤 API: Payload fch_ini: ${visitaVelneo['fch_ini']}');
-      DebugLogger.log('📤 API: Payload hor_ini: ${visitaVelneo['hor_ini']}');
-
-      final jsonData = json.encode(visitaVelneo);
-      DebugLogger.log('📤 API: JSON enviado (${jsonData.length} chars)');
-
-      final request = await httpClient
-          .postUrl(Uri.parse(_buildUrl('/CRM_AGE')))
-          .timeout(const Duration(seconds: 30));
-
-      request.headers.set('Content-Type', 'application/json; charset=utf-8');
-      request.headers.set('Accept', 'application/json');
-      request.headers.set('User-Agent', 'Flutter App');
-      request.write(jsonData);
-
-      final response = await request.close().timeout(
-        const Duration(seconds: 30),
+      final request = await httpClient.postUrl(
+        Uri.parse(_buildUrl('/CRM_AGE')),
       );
-      final stringData = await response
-          .transform(utf8.decoder)
-          .join()
-          .timeout(const Duration(seconds: 10));
+      request.headers.set('Content-Type', 'application/json');
+      request.headers.set('Accept', 'application/json');
+      request.write(json.encode(visitaVelneo));
 
-      DebugLogger.log('📥 API: Status ${response.statusCode}');
+      final response = await request.close();
+      final stringData = await response.transform(utf8.decoder).join();
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final respuesta = json.decode(stringData);
-
-        int? visitaId;
-        if (respuesta['crm_age'] != null &&
-            respuesta['crm_age'] is List &&
-            (respuesta['crm_age'] as List).isNotEmpty) {
-          visitaId = respuesta['crm_age'][0]['id'];
-        } else if (respuesta['id'] != null) {
-          visitaId = respuesta['id'];
-        }
-
-        if (visitaId == null) {
-          DebugLogger.log('⚠️ API: No se encontró ID en respuesta');
-          throw Exception('No se pudo obtener el ID de la visita');
-        }
-
-        DebugLogger.log('✅ API: Visita creada con ID $visitaId');
-        return {'id': visitaId, 'success': true};
+        final id =
+            (respuesta['crm_age'] != null && respuesta['crm_age'].isNotEmpty)
+            ? respuesta['crm_age'][0]['id']
+            : respuesta['id'];
+        return {'id': id, 'success': true};
       }
-
-      DebugLogger.log('❌ API: Error HTTP ${response.statusCode}');
       throw Exception('Error HTTP ${response.statusCode}');
-    } catch (e) {
-      DebugLogger.log('❌ API: Excepción - $e');
-      rethrow;
     } finally {
       httpClient.close();
     }

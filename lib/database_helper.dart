@@ -143,10 +143,19 @@ class DatabaseHelper {
     ''');
 
     await db.execute('''
+      CREATE TABLE direcciones (
+        id INTEGER PRIMARY KEY,
+        ent INTEGER,
+        direccion TEXT
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE agenda (
         id INTEGER PRIMARY KEY,
         nombre TEXT,
         cliente_id INTEGER,
+        direccion_id INTEGER, -- Nuevo campo
         tipo_visita INTEGER,
         asunto TEXT,
         comercial_id INTEGER,
@@ -166,12 +175,12 @@ class DatabaseHelper {
         no_gen_pro_vis INTEGER DEFAULT 0, 
         no_gen_tri INTEGER DEFAULT 0,     
         FOREIGN KEY (cliente_id) REFERENCES clientes (id),
+        FOREIGN KEY (direccion_id) REFERENCES direcciones (id),
         FOREIGN KEY (comercial_id) REFERENCES comerciales (id),
         FOREIGN KEY (campana_id) REFERENCES campanas_comerciales (id),
         FOREIGN KEY (lead_id) REFERENCES leads (id)
       )
     ''');
-
     // 🟢 Añadido serie_id a pedidos
     await db.execute('''
       CREATE TABLE pedidos (
@@ -1113,6 +1122,40 @@ class DatabaseHelper {
       return result.first;
     }
     return null;
+  }
+
+  Future<void> insertarDireccionesLote(
+    List<Map<String, dynamic>> direcciones,
+  ) async {
+    final db = await database;
+    final batch = db.batch();
+    for (var dir in direcciones) {
+      batch.insert(
+        'direcciones',
+        dir,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  // Obtener direcciones (filtradas por entidad 'ent' si se pasa el ID)
+  Future<List<Map<String, dynamic>>> obtenerDirecciones({int? ent}) async {
+    final db = await database;
+    if (ent != null) {
+      return await db.query(
+        'direcciones',
+        where: 'ent = ?',
+        whereArgs: [ent],
+        orderBy: 'direccion',
+      );
+    }
+    return await db.query('direcciones', orderBy: 'direccion');
+  }
+
+  Future<void> limpiarDirecciones() async {
+    final db = await database;
+    await db.delete('direcciones');
   }
 
   Future<Map<String, double>> obtenerPrecioYDescuento(
