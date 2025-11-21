@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // 🟢 Importar esto
 import '../database_helper.dart';
 
 class BuscarClienteDialog extends StatefulWidget {
@@ -13,12 +14,22 @@ class _BuscarClienteDialogState extends State<BuscarClienteDialog> {
   final _searchController = TextEditingController();
   List<Map<String, dynamic>> _clientes = [];
   Timer? _debounce;
+  int? _comercialId; // 🟢 Variable para el ID
 
   @override
   void initState() {
     super.initState();
-    _buscarClientes(); // carga inicial
+    _cargarComercial(); // 🟢 Cargar ID antes de buscar
     _searchController.addListener(_onSearchChanged);
+  }
+
+  // 🟢 Nuevo método para obtener el comercial
+  Future<void> _cargarComercial() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _comercialId = prefs.getInt('comercial_id');
+    });
+    _buscarClientes(); // Buscar después de tener el ID
   }
 
   @override
@@ -30,10 +41,7 @@ class _BuscarClienteDialogState extends State<BuscarClienteDialog> {
   }
 
   void _onSearchChanged() {
-    // Reinicia el timer si el usuario sigue escribiendo
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-
-    // Espera 300 ms antes de buscar
     _debounce = Timer(const Duration(milliseconds: 300), () {
       _buscarClientes(_searchController.text);
     });
@@ -41,7 +49,11 @@ class _BuscarClienteDialogState extends State<BuscarClienteDialog> {
 
   Future<void> _buscarClientes([String? busqueda]) async {
     final db = DatabaseHelper.instance;
-    final clientes = await db.obtenerClientes(busqueda);
+    // 🟢 Usamos los nuevos parámetros nombrados
+    final clientes = await db.obtenerClientes(
+      busqueda: busqueda,
+      comercialId: _comercialId,
+    );
     if (mounted) {
       setState(() => _clientes = clientes);
     }
@@ -65,7 +77,9 @@ class _BuscarClienteDialogState extends State<BuscarClienteDialog> {
           ),
           Expanded(
             child: _clientes.isEmpty
-                ? const Center(child: Text(''))
+                ? const Center(
+                    child: Text('No se encontraron clientes asignados'),
+                  )
                 : ListView.builder(
                     itemCount: _clientes.length,
                     itemBuilder: (listContext, index) {

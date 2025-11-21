@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import '../services/api_service.dart';
 import 'detalle_pedido_screen.dart';
+import 'crear_pedido_screen.dart';
 
 class ListaPedidosScreen extends StatefulWidget {
   const ListaPedidosScreen({super.key});
@@ -285,6 +286,21 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
             tooltip: 'Recargar lista',
           ),
         ],
+      ), // 🟢 2. AÑADE ESTE BLOQUE (EL BOTÓN FLOTANTE)
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          // Navegar a la pantalla de crear pedido
+          final resultado = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const CrearPedidoScreen()),
+          );
+          // Si se creó un pedido (devuelve true), recargar la lista
+          if (resultado == true) {
+            _cargarPedidos();
+          }
+        },
+        backgroundColor: const Color(0xFF032458),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -312,7 +328,10 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
               itemBuilder: (context, index) {
                 final pedido = _pedidos[index];
                 final esSincronizado = pedido['sincronizado'] == 1;
-
+                final numeroPedido = pedido['numero']?.toString() ?? '';
+                final tituloPedido = numeroPedido.isNotEmpty
+                    ? 'Pedido $numeroPedido'
+                    : 'Pedido #${pedido['id']}';
                 return Card(
                   margin: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -328,7 +347,7 @@ class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
                         color: Colors.white,
                       ),
                     ),
-                    title: Text('Pedido #${pedido['id']}'),
+                    title: Text(tituloPedido),
                     subtitle: Text(
                       '${_formatearFecha(pedido['fecha'])}\n${pedido['observaciones'] ?? 'Sin observaciones'}',
                     ),

@@ -232,17 +232,24 @@ class _DetalleClienteScreenState extends State<DetalleClienteScreen>
           const SizedBox(height: 30),
           const Divider(),
           _buildFilaDato(
-            'NIF / CIF',
-            widget.cliente['cif'] ?? '',
-            icon: Icons.badge,
+            'NOMBRE COMERCIAL',
+            widget.cliente['nom_com'] ?? '',
+            // icon: Icons.business,
           ),
           const Divider(),
           _buildFilaDato(
             'NOMBRE FISCAL',
             widget.cliente['nom_fis'] ?? '',
-            icon: Icons.business,
+            // icon: Icons.business,
           ),
           const Divider(),
+          _buildFilaDato(
+            'NIF',
+            widget.cliente['cif'] ?? '',
+            //  icon: Icons.badge,
+          ),
+
+          /*  const Divider(),
           // Mostramos los datos principales de la ficha (los que salen en la lista)
           _buildFilaDato(
             'TEL. PRINCIPAL',
@@ -266,7 +273,7 @@ class _DetalleClienteScreenState extends State<DetalleClienteScreen>
             icon: Icons.home,
             isLink: true,
             tipo: 'map',
-          ),
+          ),*/
         ],
       ),
     );
@@ -366,8 +373,9 @@ class _DetalleClienteScreenState extends State<DetalleClienteScreen>
               widget.cliente['id'],
             ),
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
+              }
               final tarifas = snapshot.data ?? [];
               if (tarifas.isEmpty) {
                 return const Center(

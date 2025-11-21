@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart'; // Opcional: Para llamar al pulsar tlf
 import '../database_helper.dart';
-import 'detalle_cliente_screen.dart'; // 🟢 La crearemos en el Paso 3
+import 'detalle_cliente_screen.dart'; //
+import 'crear_cliente_screen.dart';
 
 class CatalogoClientesScreen extends StatefulWidget {
   const CatalogoClientesScreen({super.key});
@@ -320,6 +320,21 @@ class _CatalogoClientesScreenState extends State<CatalogoClientesScreen> {
                   ),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          // Navegar a la pantalla de creación
+          final resultado = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const CrearClienteScreen()),
+          );
+          // Si se creó un cliente (return true), recargamos la lista
+          if (resultado == true) {
+            _cargarClientes(reset: true);
+          }
+        },
+        backgroundColor: const Color(0xFF032458),
+        child: const Icon(Icons.person_add, color: Colors.white),
       ),
     );
   }

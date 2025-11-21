@@ -757,16 +757,34 @@ class DatabaseHelper {
     );
   }
 
-  Future<List<Map<String, dynamic>>> obtenerClientes([String? busqueda]) async {
+  Future<List<Map<String, dynamic>>> obtenerClientes({
+    String? busqueda,
+    int? comercialId,
+  }) async {
     final db = await database;
+
+    String whereClause = '1=1';
+    List<dynamic> args = [];
+
+    // Filtro de búsqueda
     if (busqueda != null && busqueda.isNotEmpty) {
-      return await db.query(
-        'clientes',
-        where: 'nombre LIKE ? OR id LIKE ?',
-        whereArgs: ['%$busqueda%', '%$busqueda%'],
-      );
+      whereClause += ' AND (nombre LIKE ? OR id LIKE ?)';
+      args.add('%$busqueda%');
+      args.add('%$busqueda%');
     }
-    return await db.query('clientes', orderBy: 'nombre');
+
+    // 🟢 Filtro por Comercial
+    if (comercialId != null) {
+      whereClause += ' AND cmr = ?';
+      args.add(comercialId);
+    }
+
+    return await db.query(
+      'clientes',
+      where: whereClause,
+      whereArgs: args,
+      orderBy: 'nombre',
+    );
   }
 
   Future<int> actualizarPedidoSincronizado(
@@ -843,6 +861,27 @@ class DatabaseHelper {
       );
     }
     await batch.commit(noResult: true);
+  }
+  // ... dentro de DatabaseHelper ...
+
+  // Insertar un solo contacto
+  Future<int> insertarContacto(Map<String, dynamic> contacto) async {
+    final db = await database;
+    return await db.insert(
+      'contactos',
+      contacto,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  // Insertar una sola dirección
+  Future<int> insertarDireccion(Map<String, dynamic> direccion) async {
+    final db = await database;
+    return await db.insert(
+      'direcciones',
+      direccion,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<Map<String, dynamic>>> obtenerProvincias() async {

@@ -72,7 +72,6 @@ class VelneoAPIService {
   // 🟢 REEMPLAZAR el método obtenerArticulos() completo en lib/services/api_service.dart
 
   // En lib/services/api_service.dart
-
   Future<List<dynamic>> obtenerArticulos() async {
     try {
       final allArticulos = <dynamic>[];
@@ -80,23 +79,26 @@ class VelneoAPIService {
       const int pageSize = 1000;
       int totalCount = 0;
 
-      _log('📦 Descargando artículos (FORMATO LITERAL)...');
+      _log('📦 Descargando artículos (ACTIVOS)...');
 
       while (true) {
-        // 🟢 Construimos la URL manualmente como String para que las comas NO se codifiquen
-        // Formato: .../ART_M?fields=id,ref...&api_key=...&page[size]=...
         final StringBuffer urlBuffer = StringBuffer();
         urlBuffer.write('$baseUrl/ART_M');
-        urlBuffer.write(
-          '?fields=id,ref,name,pvp,exs,fam,prv,cod_bar',
-        ); // Comas literales
+
+        // Campos solicitados
+        urlBuffer.write('?fields=id,ref,name,pvp,exs,fam,prv,cod_bar');
+
+        // 🟢 CORRECCIÓN: Usamos 'filter' en lugar de 'index'
+        // Esto filtra los artículos donde el campo 'off' es false (activos)
+        urlBuffer.write('&filter[off]=false');
+
         urlBuffer.write('&api_key=$apiKey');
         urlBuffer.write('&page[size]=$pageSize');
         urlBuffer.write('&page[number]=$page');
 
         final url = urlBuffer.toString();
 
-        _log('  📄 Página $page - URL: $url');
+        _log('  📄 Página $page');
 
         try {
           final response = await _getWithSSL(
@@ -123,7 +125,7 @@ class VelneoAPIService {
                   'descripcion': articulo['name'] ?? '',
                   'precio': _convertirADouble(articulo['pvp']),
                   'stock': articulo['exs'] ?? 0,
-                  'img': '', // Vacía para lista rápida
+                  'img': '',
                   'familia': articulo['fam'] ?? '',
                   'proveedor_id': articulo['prv'] ?? 0,
                   'codigo_barras': articulo['cod_bar'] ?? '',
@@ -131,7 +133,7 @@ class VelneoAPIService {
               }).toList();
 
               allArticulos.addAll(articulos);
-              _log('    -> Recibidos ${articulos.length} artículos');
+              _log('    -> Recibidos ${articulos.length} artículos activos');
 
               if (articulos.length < pageSize) break;
               if (totalCount > 0 && allArticulos.length >= totalCount) break;
@@ -151,15 +153,13 @@ class VelneoAPIService {
         }
       }
 
-      _log('✅ Total artículos descargados: ${allArticulos.length}');
+      _log('✅ Total artículos activos descargados: ${allArticulos.length}');
       return allArticulos;
     } catch (e) {
       _log('❌ Error en obtenerArticulos: $e');
       rethrow;
     }
   }
-
-  // En lib/services/api_service.dart
 
   // En lib/services/api_service.dart
 
@@ -244,8 +244,9 @@ class VelneoAPIService {
 
               if (entidadesList.length < pageSize) break;
               if (totalCount > 0 &&
-                  (allClientes.length + allComerciales.length) >= totalCount)
+                  (allClientes.length + allComerciales.length) >= totalCount) {
                 break;
+              }
               page++;
               await Future.delayed(const Duration(milliseconds: 100));
             } else {
@@ -3666,10 +3667,138 @@ class VelneoAPIService {
     }
   }
 
+  Future<int> crearCliente(Map<String, dynamic> cliente) async {
+    final httpClient = HttpClient()
+      ..badCertificateCallback =
+          ((X509Certificate cert, String host, int port) => true)
+      ..connectionTimeout = const Duration(seconds: 30);
+
+    try {
+      final clienteVelneo = {
+        'nom_fis': cliente['nombre'],
+        'nom_com': cliente['nombre_comercial'] ?? '',
+        'cif': cliente['cif'] ?? '',
+        'tlf': cliente['telefono'] ?? '',
+        'eml': cliente['email'] ?? '',
+        'dir': cliente['direccion'] ?? '',
+        'es_clt': true,
+        'emp': '1',
+      };
+
+      if (cliente['comercial_id'] != null) {
+        clienteVelneo['cmr'] = cliente['comercial_id'];
+      }
+
+      //  IMPRIMIR LA URL PARA VERIFICARLA
+      final urlDestino = _buildUrl('/ENT_M');
+      print(
+        '🚀 [DEBUG] URL API: $urlDestino',
+      ); // <--- ESTA LÍNEA TE DIRÁ LA URL
+
+      final request = await httpClient.postUrl(Uri.parse(urlDestino));
+      request.headers.set('Content-Type', 'application/json');
+      request.headers.set('Accept', 'application/json');
+      request.write(json.encode(clienteVelneo));
+
+      final response = await request.close();
+      final stringData = await response.transform(utf8.decoder).join();
+
+      //  IMPRIMIR LA RESPUESTA DEL SERVIDOR SI FALLA
+      print('📥 [DEBUG] Status: ${response.statusCode}');
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        print('📥 [DEBUG] Error Body: $stringData');
+      }
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = json.decode(stringData);
+        if (data['id'] != null) return data['id'];
+        if (data['ent_m'] != null && (data['ent_m'] as List).isNotEmpty) {
+          return data['ent_m'][0]['id'];
+        }
+      }
+      throw Exception(
+        'Error creando cliente: ${response.statusCode} - $stringData',
+      );
+    } finally {
+      httpClient.close();
+    }
+  }
+
+  //  2. CREAR CONTACTO (CORREGIDO: Ignora SSL)
+  Future<void> crearContacto(Map<String, dynamic> contacto) async {
+    final httpClient = HttpClient()
+      ..badCertificateCallback =
+          ((X509Certificate cert, String host, int port) => true)
+      ..connectionTimeout = const Duration(seconds: 30);
+
+    try {
+      final contactoVelneo = {
+        'ent': contacto['cliente_id'],
+        'ctt_clf': contacto['tipo'],
+        'val': contacto['valor'],
+        'name': contacto['nombre'] ?? '',
+        'prn': contacto['es_principal'] == 1,
+      };
+
+      final request = await httpClient.postUrl(Uri.parse(_buildUrl('/CTT_M')));
+      request.headers.set('Content-Type', 'application/json');
+      request.headers.set('Accept', 'application/json');
+      request.write(json.encode(contactoVelneo));
+
+      final response = await request.close();
+      await response.drain();
+    } catch (e) {
+      print('⚠️ Error creando contacto: $e');
+    } finally {
+      httpClient.close();
+    }
+  }
+
+  Future<void> crearDireccion(Map<String, dynamic> direccion) async {
+    final httpClient = HttpClient()
+      ..badCertificateCallback =
+          ((X509Certificate cert, String host, int port) => true)
+      ..connectionTimeout = const Duration(seconds: 30);
+
+    try {
+      final direccionVelneo = {
+        'ent': direccion['cliente_id'],
+        'dir': direccion['direccion'],
+        'cps': direccion['cp'] ?? '',
+        'loc': direccion['poblacion'] ?? '',
+        'cmr': direccion['comercial_id'],
+        'tip_de_dir': 1,
+        'pai': 1,
+        'name': direccion['direccion'],
+        'off': false,
+      };
+
+      print(
+        '🚀 [DEBUG DIR] Enviando JSON CORRECTO: ${json.encode(direccionVelneo)}',
+      );
+
+      final request = await httpClient.postUrl(Uri.parse(_buildUrl('/DIR_M')));
+      request.headers.set('Content-Type', 'application/json');
+      request.headers.set('Accept', 'application/json');
+      request.write(json.encode(direccionVelneo));
+
+      final response = await request.close();
+      final stringData = await response.transform(utf8.decoder).join();
+
+      print('📥 [DEBUG DIR] Respuesta: ${response.statusCode} - $stringData');
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception('Error al crear dirección: $stringData');
+      }
+    } catch (e) {
+      print('❌ Error creando dirección: $e');
+    } finally {
+      httpClient.close();
+    }
+  }
+
   Future<Map<String, double>> obtenerConfiguracionIVA() async {
     try {
-      // Usamos IMP_M que es la tabla estándar de impuestos.
-      // Si tu tabla es diferente, cambia '/IMP_M'
       final url = _buildUrlWithParams('/IMP_M', {'page[size]': '100'});
       print('📥 Descargando configuración de IVA desde $url');
 
@@ -3680,7 +3809,6 @@ class VelneoAPIService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
 
-        // Valores por defecto seguros
         double general = 21.0;
         double reducido = 10.0;
         double superReducido = 4.0;
@@ -3689,8 +3817,6 @@ class VelneoAPIService {
         // Mapeo de la respuesta
         if (data['imp_m'] != null && data['imp_m'] is List) {
           for (var imp in data['imp_m']) {
-            // Asumimos 'cod' para el código (G, R, S) y 'por' para el porcentaje
-            // Si en tu vServer los campos son diferentes, cámbialos aquí.
             final codigo = imp['cod']?.toString() ?? '';
             final porcentaje = _convertirADouble(imp['por']);
 

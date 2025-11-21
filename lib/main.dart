@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'database_helper.dart';
-import 'services/api_service.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/auth_screen.dart';
