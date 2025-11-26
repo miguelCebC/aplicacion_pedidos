@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../database_helper.dart';
-import 'home_screen.dart';
+import 'auth_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -22,7 +22,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isLoading = false;
   String _statusMessage = '';
-  final List<String> _logMessages = [];
 
   @override
   void dispose() {
@@ -33,232 +32,165 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _addLog(String message) {
-    setState(() {
-      _logMessages.add(
-        '${DateTime.now().toString().substring(11, 19)} - $message',
-      );
-      if (_logMessages.length > 50) {
-        _logMessages.removeAt(0);
-      }
-    });
-    print(message);
-  }
-
   Future<void> _iniciarSesion() async {
     final comercialId = int.tryParse(_comercialIdController.text.trim());
     final codigoApp = _codigoAppController.text.trim();
 
-    if (comercialId == null) {
+    if (comercialId == null || codigoApp.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ El ID debe ser un número válido')),
-      );
-      return;
-    }
-
-    if (codigoApp.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ El código de app es obligatorio')),
-      );
-      return;
-    }
-    if (_serverUrlController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ La URL del servidor es obligatoria')),
-      );
-      return;
-    }
-
-    if (_apiKeyController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ La API Key es obligatoria')),
+        const SnackBar(content: Text('❌ Revisa los datos de acceso')),
       );
       return;
     }
 
     setState(() {
       _isLoading = true;
-      _statusMessage = 'Validando comercial...';
-      _logMessages.clear();
+      _statusMessage = 'Validando acceso...';
     });
 
     try {
-      // Construir URL completa con versión
       String serverUrl = _serverUrlController.text.trim();
       final apiVersion = _apiVersionController.text.trim();
-
       if (serverUrl.endsWith('/')) {
         serverUrl = serverUrl.substring(0, serverUrl.length - 1);
       }
-
-      if (serverUrl.endsWith('/v1') ||
-          serverUrl.endsWith('/v2') ||
-          serverUrl.endsWith('/v3')) {
-        serverUrl = serverUrl.substring(0, serverUrl.lastIndexOf('/'));
-      }
-
       final fullUrl = '$serverUrl/$apiVersion';
+      String finalUrl = fullUrl.startsWith('http')
+          ? fullUrl
+          : 'https://$fullUrl';
 
-      String finalUrl = fullUrl;
-      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
-        finalUrl = 'https://$finalUrl';
-      }
-
-      _addLog('🌐 Conectando a: $finalUrl');
       final apiKey = _apiKeyController.text.trim();
       final apiService = VelneoAPIService(finalUrl, apiKey);
 
-      // 1. Descargar comerciales
-      setState(() => _statusMessage = 'Descargando comerciales...');
-      _addLog('📥 Descargando lista de comerciales desde API');
-
+      // --- 1. Descargar entidades ---
+      setState(() => _statusMessage = 'Buscando entidad...');
       final resultado = await apiService.obtenerClientes();
+      final clientesLista = resultado['clientes'] as List;
       final comercialesLista = resultado['comerciales'] as List;
-
-      _addLog('📊 Total comerciales descargados: ${comercialesLista.length}');
 
       final db = DatabaseHelper.instance;
       await db.limpiarComerciales();
       await db.insertarComercialesLote(
         comercialesLista.cast<Map<String, dynamic>>(),
       );
-      _addLog('💾 Comerciales guardados en base de datos local');
+      await db.insertarClientesLote(clientesLista.cast<Map<String, dynamic>>());
 
-      // 2. Validar comercial
-      setState(() => _statusMessage = 'Validando comercial ID $comercialId...');
-      _addLog('🔍 Buscando comercial ID $comercialId en base de datos local');
-
-      final comercial = await db.obtenerComercialPorId(comercialId);
-
-      if (comercial == null || comercial.isEmpty) {
-        _addLog('❌ No se encontró comercial con ID $comercialId');
-        throw Exception('No se encontró ningún comercial con ID $comercialId');
+      // --- 2. Validar ID Entidad ---
+      Map<String, dynamic>? entidadEncontrada;
+      try {
+        entidadEncontrada = comercialesLista.firstWhere(
+          (c) => c['id'].toString() == comercialId.toString(),
+        );
+      } catch (e) {
+        try {
+          entidadEncontrada = clientesLista.firstWhere(
+            (c) => c['id'].toString() == comercialId.toString(),
+          );
+        } catch (e) {
+          // No existe
+        }
       }
 
-      _addLog('✅ Comercial encontrado: ${comercial['nombre']}');
+      if (entidadEncontrada == null) {
+        throw Exception('No existe ninguna Entidad con ID $comercialId.');
+      }
 
-      // 3. Descargar usuarios
-      setState(() => _statusMessage = 'Descargando usuarios de app...');
-      _addLog('📥 Descargando usuarios desde API');
-
+      // --- 3. Buscar el usuario asociado ---
+      setState(() => _statusMessage = 'Verificando usuario...');
       final usuariosLista = await apiService.obtenerTodosUsuarios();
-      _addLog('📊 Total usuarios descargados: ${usuariosLista.length}');
-
       await db.insertarUsuariosLote(usuariosLista.cast<Map<String, dynamic>>());
-      _addLog('💾 Usuarios guardados en base de datos local');
 
-      // 4. Buscar usuario asociado
-      setState(() => _statusMessage = 'Buscando usuario de app...');
-      _addLog('🔍 Buscando usuario para comercial ID $comercialId en BD local');
-
-      final usuario = await db.obtenerUsuarioPorComercial(comercialId);
-
-      if (usuario == null || usuario.isEmpty) {
-        _addLog('❌ No se encontró usuario para este comercial');
-        throw Exception('No se encontró usuario de app para este comercial.');
+      Map<String, dynamic>? usuario;
+      try {
+        usuario = usuariosLista.cast<Map<String, dynamic>>().firstWhere(
+          (u) => u['ent'].toString() == comercialId.toString(),
+        );
+      } catch (e) {
+        // Fallback
       }
 
-      final usuarioAppId = usuario['id'] as int;
-      _addLog(
-        '✅ Usuario de app encontrado: ${usuario['name']} (ID: $usuarioAppId)',
-      );
+      if (usuario == null) {
+        throw Exception(
+          'La entidad "${entidadEncontrada['nombre']}" no tiene un Usuario de App asociado (USR_M).',
+        );
+      }
 
-      // 5. Validar acceso
-      setState(() => _statusMessage = 'Validando acceso a la aplicación...');
-      _addLog('📥 Descargando permisos de aplicación');
-
+      // --- 4. Validar permisos en usr_apl ---
+      setState(() => _statusMessage = 'Verificando permisos...');
       final usrAplLista = await apiService.obtenerTodosUsrApl();
-      _addLog('📊 Total registros usr_apl descargados: ${usrAplLista.length}');
 
-      _addLog(
-        '🔐 Verificando acceso del usuario $usuarioAppId al código de app $codigoApp',
-      );
-
-      final tieneAcceso = usrAplLista.any(
-        (reg) =>
-            reg['usr_m'] == usuarioAppId &&
-            reg['apl_tec'] == int.parse(codigoApp),
-      );
-
-      if (!tieneAcceso) {
-        _addLog('❌ Usuario no tiene acceso a esta aplicación');
-        throw Exception('Este usuario no tiene acceso a la aplicación.');
+      // 🟢 CHEQUEO DE LISTA VACÍA CON MENSAJE CLARO
+      if (usrAplLista.isEmpty) {
+        throw Exception(
+          'La lista de permisos (USR_APL) está vacía. Revisa la conexión o el nombre de la tabla en Velneo.',
+        );
       }
 
-      _addLog('✅ Acceso validado correctamente');
+      // 🟢 BÚSQUEDA Y COMPARACIÓN MANUAL (Como pediste)
+      Map<String, dynamic>? relacionEncontrada;
 
-      // Guardar configuración
+      // Convertimos a String para asegurar la comparación
+      final String targetUsrM = usuario['id'].toString();
+      final String targetAplTec = codigoApp.toString();
+
+      print('🔍 Buscando permiso: UsrM=$targetUsrM, AplTec=$targetAplTec');
+
+      for (var reg in usrAplLista) {
+        final String dbUsrM = reg['usr_m'].toString();
+        final String dbAplTec = reg['apl_tec'].toString();
+
+        if (dbUsrM == targetUsrM && dbAplTec == targetAplTec) {
+          relacionEncontrada = reg;
+          break; // Encontrado
+        }
+      }
+
+      if (relacionEncontrada == null) {
+        // Si falla, buscamos qué permisos TIENE ese usuario para mostrar error útil
+        final permisosUsuario = usrAplLista
+            .where((reg) => reg['usr_m'].toString() == targetUsrM)
+            .map((reg) => reg['apl_tec'].toString())
+            .toList();
+
+        throw Exception(
+          'No se encontró relación entre el Usuario ${usuario['name']} (ID: $targetUsrM) y la App $codigoApp.\n'
+          'Permisos encontrados para este usuario: ${permisosUsuario.isEmpty ? "Ninguno" : permisosUsuario.join(", ")}',
+        );
+      }
+
+      // Si llega aquí, ha encontrado la relación.
+      // 🟢 Nota: No verificamos 'off' como pediste.
+
+      // 5. Éxito - Guardar sesión
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('velneo_url', finalUrl);
       await prefs.setString('velneo_api_key', apiKey);
-      await prefs.setString('api_version', apiVersion);
       await prefs.setInt('comercial_id', comercialId);
-      await prefs.setString('comercial_nombre', comercial['nombre']);
-      await prefs.setInt('usuario_app_id', usuarioAppId);
-      await prefs.setString('usuario_app_nombre', usuario['name']);
-      _addLog('💾 Configuración guardada');
+      await prefs.setString(
+        'comercial_nombre',
+        entidadEncontrada['nombre'] ?? 'Usuario',
+      );
 
-      // Sincronizar todos los datos
-      await _sincronizarDatos(apiService, comercialId);
+      await db.eliminarContrasenaLocal();
 
       if (!mounted) return;
 
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
+        MaterialPageRoute(builder: (context) => const AuthScreen()),
       );
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _statusMessage = '';
-      });
-
-      _addLog('❌ ERROR: $e');
-
+      setState(() => _isLoading = false);
       if (!mounted) return;
-
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Error de Conexión'),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 400,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Error: ${e.toString().replaceAll('Exception: ', '')}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.red,
-                    ),
-                  ),
-                  const Divider(height: 24),
-                  const Text(
-                    'Log completo:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  ..._logMessages.map(
-                    (log) => Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        log,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+        builder: (ctx) => AlertDialog(
+          title: const Text('Error de Acceso'),
+          content: SingleChildScrollView(
+            child: Text(e.toString().replaceAll('Exception: ', '')),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(ctx),
               child: const Text('Cerrar'),
             ),
           ],
@@ -267,237 +199,27 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _sincronizarDatos(
-    VelneoAPIService apiService,
-    int comercialId,
-  ) async {
-    final db = DatabaseHelper.instance;
-
-    try {
-      // Artículos
-      setState(() => _statusMessage = 'Descargando artículos...');
-      _addLog('📥 Descargando artículos...');
-      final articulosLista = await apiService.obtenerArticulos();
-      await db.limpiarArticulos();
-      await db.insertarArticulosLote(
-        articulosLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${articulosLista.length} artículos guardados');
-
-      // 🟢 NUEVO: Descargar Familias
-      setState(() => _statusMessage = 'Descargando familias...');
-      _addLog('📥 Descargando familias...');
-      try {
-        final familiasLista = await apiService.obtenerFamilias();
-        await db.limpiarFamilias();
-        await db.insertarFamiliasLote(
-          familiasLista.cast<Map<String, dynamic>>(),
-        );
-        _addLog('✅ ${familiasLista.length} familias guardadas');
-      } catch (e) {
-        _addLog('⚠️ Error descargando familias (no crítico): $e');
-      }
-      // ----------------------------------------------------
-
-      // Clientes y Comerciales
-      setState(() => _statusMessage = 'Descargando clientes...');
-      _addLog('📥 Descargando clientes y comerciales...');
-      final resultado = await apiService.obtenerClientes();
-      final clientesLista = resultado['clientes'] as List;
-      final comercialesLista = resultado['comerciales'] as List;
-
-      await db.limpiarClientes();
-      await db.insertarClientesLote(clientesLista.cast<Map<String, dynamic>>());
-      await db.limpiarComerciales();
-      await db.insertarComercialesLote(
-        comercialesLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog(
-        '✅ ${clientesLista.length} clientes y ${comercialesLista.length} comerciales guardados',
-      );
-
-      // Tarifas
-      setState(() => _statusMessage = 'Descargando tarifas...');
-      _addLog('📥 Descargando tarifas por cliente...');
-      final tarifasClienteLista = await apiService.obtenerTarifasCliente();
-      await db.limpiarTarifasCliente();
-      await db.insertarTarifasClienteLote(
-        tarifasClienteLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${tarifasClienteLista.length} tarifas por cliente guardadas');
-
-      _addLog('📥 Descargando tarifas por artículo...');
-      final tarifasArticuloLista = await apiService.obtenerTarifasArticulo();
-      await db.limpiarTarifasArticulo();
-      await db.insertarTarifasArticuloLote(
-        tarifasArticuloLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog(
-        '✅ ${tarifasArticuloLista.length} tarifas por artículo guardadas',
-      );
-
-      // Tipos de visita
-      setState(() => _statusMessage = 'Descargando tipos de visita...');
-      _addLog('📥 Descargando tipos de visita...');
-      final tiposVisitaLista = await apiService.obtenerTiposVisita();
-      await db.limpiarTiposVisita();
-      await db.insertarTiposVisitaLote(
-        tiposVisitaLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${tiposVisitaLista.length} tipos de visita guardados');
-
-      // Campañas
-      setState(() => _statusMessage = 'Descargando campañas...');
-      _addLog('📥 Descargando campañas comerciales...');
-      final campanasLista = await apiService.obtenerCampanas();
-      await db.limpiarCampanas();
-      await db.insertarCampanasLote(campanasLista.cast<Map<String, dynamic>>());
-      _addLog('✅ ${campanasLista.length} campañas guardadas');
-
-      // Leads
-      setState(() => _statusMessage = 'Descargando leads...');
-      _addLog('📥 Descargando leads del comercial $comercialId...');
-      final leadsLista = await apiService.obtenerLeads(comercialId);
-      await db.limpiarLeads();
-      await db.insertarLeadsLote(leadsLista.cast<Map<String, dynamic>>());
-      _addLog('✅ ${leadsLista.length} leads guardados');
-
-      // Agenda
-      setState(() => _statusMessage = 'Descargando agenda...');
-      _addLog('📥 Descargando agenda del comercial $comercialId...');
-      final agendasLista = await apiService.obtenerAgenda(comercialId);
-      await db.limpiarAgenda();
-      await db.insertarAgendasLote(agendasLista.cast<Map<String, dynamic>>());
-      _addLog('✅ ${agendasLista.length} eventos de agenda guardados');
-
-      // Pedidos
-      setState(() => _statusMessage = 'Descargando pedidos...');
-      _addLog('📥 Descargando pedidos del comercial $comercialId...');
-      final pedidosLista = await apiService.obtenerPedidos(comercialId);
-      await db.limpiarPedidos();
-      await db.insertarPedidosLote(pedidosLista.cast<Map<String, dynamic>>());
-      _addLog('✅ ${pedidosLista.length} pedidos guardados');
-
-      _addLog('📥 Descargando líneas de pedido...');
-      final lineasPedido = await apiService.obtenerTodasLineasPedido();
-      await db.insertarLineasPedidoLote(
-        lineasPedido.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${lineasPedido.length} líneas de pedido guardadas');
-
-      // Presupuestos
-      setState(() => _statusMessage = 'Descargando presupuestos...');
-      _addLog('📥 Descargando presupuestos del comercial $comercialId...');
-      final presupuestosLista = await apiService.obtenerPresupuestos(
-        comercialId,
-      );
-      await db.limpiarPresupuestos();
-      await db.insertarPresupuestosLote(
-        presupuestosLista.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${presupuestosLista.length} presupuestos guardados');
-      _addLog('📥 Descargando líneas de presupuesto...');
-      final lineasPresupuesto = await apiService
-          .obtenerTodasLineasPresupuesto();
-      await db.insertarLineasPresupuestoLote(
-        lineasPresupuesto.cast<Map<String, dynamic>>(),
-      );
-      _addLog('✅ ${lineasPresupuesto.length} líneas de presupuesto guardadas');
-
-      // Guardar timestamp
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(
-        'ultima_sincronizacion',
-        DateTime.now().millisecondsSinceEpoch,
-      );
-
-      setState(() => _statusMessage = '✅ Sincronización completada');
-      _addLog('🎉 ¡Sincronización completa exitosa!');
-    } catch (e) {
-      _addLog('❌ Error en sincronización: $e');
-      rethrow;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
-        body: SafeArea(
+        body: Center(
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const CircularProgressIndicator(
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          Color(0xFF032458),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      Text(
-                        _statusMessage,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Container(
-                height: 200,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  border: Border(top: BorderSide(color: Colors.grey[300]!)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Log de Sincronización',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const Divider(),
-                    Expanded(
-                      child: ListView.builder(
-                        reverse: true,
-                        itemCount: _logMessages.length,
-                        itemBuilder: (context, index) {
-                          final reversedIndex = _logMessages.length - 1 - index;
-                          return Text(
-                            _logMessages[reversedIndex],
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontFamily: 'monospace',
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              const CircularProgressIndicator(color: Color(0xFF032458)),
+              const SizedBox(height: 20),
+              Text(_statusMessage),
             ],
           ),
         ),
       );
     }
-
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 40),
               const Icon(
@@ -508,26 +230,17 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 16),
               const Text(
                 'CRM Velneo',
-                textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
                   color: Color(0xFF032458),
                 ),
               ),
-              const SizedBox(height: 8),
-              const Text(
-                'Configuración Inicial',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
               const SizedBox(height: 48),
               TextField(
                 controller: _codigoAppController,
                 decoration: const InputDecoration(
-                  labelText: 'Código de App *',
-                  hintText: 'Código único de aplicación',
-                  prefixIcon: Icon(Icons.smartphone),
+                  labelText: 'Código App',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -535,9 +248,7 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _comercialIdController,
                 decoration: const InputDecoration(
-                  labelText: 'ID del Comercial *',
-                  hintText: 'Ej: 123',
-                  prefixIcon: Icon(Icons.person),
+                  labelText: 'ID Entidad / Comercial',
                   border: OutlineInputBorder(),
                 ),
                 keyboardType: TextInputType.number,
@@ -546,21 +257,15 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _serverUrlController,
                 decoration: const InputDecoration(
-                  labelText: 'URL del Servidor *',
-                  hintText: 'servidor:puerto/ruta',
-                  helperText: 'Sin versión (v1, v2, etc.)',
-                  prefixIcon: Icon(Icons.dns),
+                  labelText: 'Servidor',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.url,
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _apiVersionController,
                 decoration: const InputDecoration(
-                  labelText: 'Versión de la API *',
-                  hintText: 'v1, v2, v3...',
-                  prefixIcon: Icon(Icons.api),
+                  labelText: 'Versión API',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -568,9 +273,7 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _apiKeyController,
                 decoration: const InputDecoration(
-                  labelText: 'API Key *',
-                  hintText: 'Ingrese su clave API',
-                  prefixIcon: Icon(Icons.vpn_key),
+                  labelText: 'API Key',
                   border: OutlineInputBorder(),
                 ),
                 obscureText: true,
@@ -580,18 +283,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 onPressed: _iniciarSesion,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF032458),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 16,
+                    horizontal: 32,
                   ),
                 ),
                 child: const Text(
                   'INICIAR SESIÓN',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
+                  style: TextStyle(color: Colors.white),
                 ),
               ),
             ],

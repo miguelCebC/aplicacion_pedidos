@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'theme/app_theme.dart';
-import 'screens/login_screen.dart';
-import 'screens/auth_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'theme/app_theme.dart';
+import 'screens/login_screen.dart'; // Asegura que este archivo existe y tiene la clase LoginScreen
+import 'screens/auth_screen.dart'; // Asegura que este archivo existe y tiene la clase AuthScreen
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,20 +21,18 @@ class _VelneoAppState extends State<VelneoApp> {
   @override
   void initState() {
     super.initState();
-    // Iniciar sincronización en segundo plano
-    //_sincronizarEnSegundoPlano();
   }
 
   Future<Widget> _verificarSesion() async {
     final prefs = await SharedPreferences.getInstance();
     final comercialId = prefs.getInt('comercial_id');
 
+    // Si no hay comercial guardado, vamos al Login
     if (comercialId == null) {
-      // No hay sesión, ir a login completo
       return const LoginScreen();
     }
 
-    // Hay sesión guardada, ir a pantalla de autenticación
+    // Si hay comercial, vamos a la pantalla de PIN (AuthScreen)
     return const AuthScreen();
   }
 
@@ -43,6 +41,7 @@ class _VelneoAppState extends State<VelneoApp> {
     return MaterialApp(
       title: 'CRM Velneo',
       theme: AppTheme.theme,
+      debugShowCheckedModeBanner: false, // Quitar etiqueta debug
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -52,12 +51,15 @@ class _VelneoAppState extends State<VelneoApp> {
       home: FutureBuilder<Widget>(
         future: _verificarSesion(),
         builder: (context, snapshot) {
+          // Mientras carga, mostramos spinner
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
+              body: Center(
+                child: CircularProgressIndicator(color: Color(0xFF032458)),
+              ),
             );
           }
-
+          // Si hay error o es nulo, por seguridad mandamos al Login
           return snapshot.data ?? const LoginScreen();
         },
       ),

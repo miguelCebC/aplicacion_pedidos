@@ -1,5 +1,7 @@
-import 'dart:convert'; // 🟢 IMPORTANTE: Necesario para jsonEncode
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import '../services/api_service.dart';
@@ -7,6 +9,7 @@ import '../models/models.dart';
 import '../widgets/buscar_cliente_dialog.dart';
 import '../widgets/buscar_articulo_dialog.dart';
 import '../widgets/editar_linea_dialog.dart';
+import '../widgets/linea_pedido_widget.dart';
 
 class EditarPedidoScreen extends StatefulWidget {
   final Map<String, dynamic> pedido;
@@ -24,6 +27,22 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
   bool _isLoading = true;
   bool _guardando = false;
 
+  // Listas maestras
+  List<Map<String, dynamic>> _direccionesCliente = [];
+  List<Map<String, dynamic>> _series = [];
+  List<Map<String, dynamic>> _formasPago = [];
+
+  // Campos del formulario
+  int? _direccionEntregaId;
+  int? _serieSeleccionadaId;
+  int? _formaPagoSeleccionadaId;
+  DateTime? _fechaPedido;
+  DateTime? _fechaEntrega;
+
+  // Foto
+  String? _fotoBase64;
+  bool _fotoModificada = false; // Para saber si hay que subirla/borrarla
+
   @override
   void initState() {
     super.initState();
@@ -36,126 +55,33 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
     super.dispose();
   }
 
-  // ==============================================================
-  // 🟢 NUEVO MÉTODO: MOSTRAR JSON EN POPUP (DEBUG)
-  // ==============================================================
-  Future<void> _mostrarDebugJson() async {
-    if (_clienteSeleccionado == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Faltan datos para generar el JSON')),
-      );
-      return;
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    final comercialId = prefs.getInt('comercial_id');
-
-    final cabeceraJson = {
-      'emp': '1',
-      'emp_div': '1',
-      'clt': _clienteSeleccionado!['id'],
-      'cmr': comercialId,
-      'obs': _observacionesController.text,
-    };
-
-    final lineasJson = _lineas.map((l) {
-      return {
-        'vta_ped': widget.pedido['id'],
-        'emp': '1',
-        'art': l.articulo['id'],
-        'can_ped': l.cantidad,
-        'pre': l.precio,
-        'reg_iva_vta': l.tipoIva, // 🟢 CORREGIDO: Ahora muestra el campo real
-      };
-    }).toList();
-
-    final encoder = const JsonEncoder.withIndent('  ');
-    final headerString = encoder.convert(cabeceraJson);
-    final linesString = encoder.convert(lineasJson);
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('🔍 DEBUG: JSON a Enviar'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'CABECERA:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue,
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  color: Colors.grey[200],
-                  width: double.infinity,
-                  child: Text(
-                    headerString,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'LÍNEAS (${lineasJson.length}):',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green,
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  color: Colors.grey[200],
-                  width: double.infinity,
-                  child: Text(
-                    linesString,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cerrar'),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // --- CARGA DE DATOS ---
   Future<void> _cargarDatos() async {
     setState(() => _isLoading = true);
 
     try {
       final db = DatabaseHelper.instance;
 
-      // Cargar cliente
+      // 1. Cargar Maestros (Series, Formas Pago)
+      final series = await db.obtenerSeries(tipo: 'V');
+      final formasPago = await db.obtenerFormasPago();
+
+      // 2. Cargar Cliente
       final clientes = await db.obtenerClientes();
       final cliente = clientes.firstWhere(
         (c) => c['id'] == widget.pedido['cliente_id'],
         orElse: () => {
           'id': widget.pedido['cliente_id'],
-          'nombre': 'Cliente no encontrado',
+          'nombre': 'Cliente desconocido',
         },
       );
 
-      // Cargar líneas del pedido
+      // 3. Cargar Direcciones del cliente
+      final direcciones = await db.obtenerDirecciones(
+        ent: widget.pedido['cliente_id'],
+      );
+
+      // 4. Cargar Líneas
       final lineasRaw = await db.obtenerLineasPedido(widget.pedido['id']);
       final articulos = await db.obtenerArticulos();
 
@@ -171,7 +97,6 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
           },
         );
 
-        // 🟢 CORRECCIÓN: Aseguramos leer el tipo de IVA de la BD
         String tipoIvaDb = linea['tipo_iva']?.toString() ?? 'G';
 
         lineasCargadas.add(
@@ -180,22 +105,68 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
             cantidad: (linea['cantidad'] as num).toDouble(),
             precio: (linea['precio'] as num).toDouble(),
             descuento: (linea['por_descuento'] as num?)?.toDouble() ?? 0.0,
-            tipoIva: tipoIvaDb, // Usar el valor real
+            dto1: (linea['dto1'] as num?)?.toDouble() ?? 0.0,
+            dto2: (linea['dto2'] as num?)?.toDouble() ?? 0.0,
+            dto3: (linea['dto3'] as num?)?.toDouble() ?? 0.0,
+            tipoIva: tipoIvaDb,
           ),
         );
       }
 
-      setState(() {
-        _clienteSeleccionado = cliente;
-        _observacionesController.text = widget.pedido['observaciones'] ?? '';
-        _lineas.addAll(lineasCargadas);
-        _isLoading = false;
-      });
+      // 5. Cargar Foto (Desde API, ya que no se guarda local el base64 completo)
+      String? foto;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        String url = prefs.getString('velneo_url') ?? '';
+        String apiKey = prefs.getString('velneo_api_key') ?? '';
+        if (url.isNotEmpty) {
+          if (!url.startsWith('http')) url = 'https://$url';
+          final apiService = VelneoAPIService(url, apiKey);
+          foto = await apiService.obtenerFotoPedido(widget.pedido['id']);
+        }
+      } catch (e) {
+        print('Error cargando foto: $e');
+      }
+
+      // 6. Asignar valores al estado
+      if (mounted) {
+        setState(() {
+          _series = series;
+          _formasPago = formasPago;
+          _clienteSeleccionado = cliente;
+          _direccionesCliente = direcciones;
+          _lineas.addAll(lineasCargadas);
+          _observacionesController.text = widget.pedido['observaciones'] ?? '';
+          _fotoBase64 = foto;
+
+          // Asignar campos del pedido
+          _serieSeleccionadaId = widget.pedido['serie_id'] == 0
+              ? null
+              : widget.pedido['serie_id'];
+          _formaPagoSeleccionadaId = widget.pedido['forma_pago'] == 0
+              ? null
+              : widget.pedido['forma_pago'];
+          _direccionEntregaId = widget.pedido['direccion_entrega_id'] == 0
+              ? null
+              : widget.pedido['direccion_entrega_id'];
+
+          if (widget.pedido['fecha'] != null) {
+            _fechaPedido = DateTime.tryParse(widget.pedido['fecha']);
+          }
+          if (widget.pedido['fecha_entrega'] != null) {
+            _fechaEntrega = DateTime.tryParse(widget.pedido['fecha_entrega']);
+          }
+
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       print('Error cargando datos: $e');
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
+
+  // --- LÓGICA DE NEGOCIO ---
 
   Future<void> _seleccionarCliente() async {
     final cliente = await showDialog<Map<String, dynamic>>(
@@ -203,7 +174,18 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
       builder: (dialogContext) => const BuscarClienteDialog(),
     );
     if (cliente != null) {
-      setState(() => _clienteSeleccionado = cliente);
+      setState(() {
+        _clienteSeleccionado = cliente;
+        _direccionEntregaId = null;
+        _direccionesCliente = [];
+      });
+      // Cargar direcciones del nuevo cliente
+      final db = DatabaseHelper.instance;
+      final dirs = await db.obtenerDirecciones(ent: cliente['id']);
+      setState(() {
+        _direccionesCliente = dirs;
+        if (dirs.isNotEmpty) _direccionEntregaId = dirs.first['id'];
+      });
     }
   }
 
@@ -214,7 +196,6 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
       );
       return;
     }
-
     final articulo = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (dialogContext) => const BuscarArticuloDialog(),
@@ -237,22 +218,17 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
           cantidad: 1,
           precio: precioInfo['precio']!,
           descuento: precioInfo['descuento']!,
-          tipoIva: 'G', // Valor por defecto al añadir nueva
+          dto1: 0,
+          dto2: 0,
+          dto3: 0,
+          tipoIva: 'G',
         ),
       );
 
       if (lineaConPrecio != null) {
-        setState(() {
-          _lineas.add(lineaConPrecio);
-        });
+        setState(() => _lineas.add(lineaConPrecio));
       }
     }
-  }
-
-  void _eliminarLinea(int index) {
-    setState(() {
-      _lineas.removeAt(index);
-    });
   }
 
   Future<void> _editarLinea(int index) async {
@@ -264,39 +240,79 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
         cantidad: lineaActual.cantidad,
         precio: lineaActual.precio,
         descuento: lineaActual.descuento,
-        tipoIva: lineaActual.tipoIva, // Pasar valor actual
+        dto1: lineaActual.dto1,
+        dto2: lineaActual.dto2,
+        dto3: lineaActual.dto3,
+        tipoIva: lineaActual.tipoIva,
       ),
     );
 
     if (lineaEditada != null) {
+      setState(() => _lineas[index] = lineaEditada);
+    }
+  }
+
+  double _calcularTotal() {
+    return _lineas.fold(0, (sum, l) {
+      final base = l.cantidad * l.precioNeto;
+      return sum + (base * (1 + (l.porcentajeIva / 100)));
+    });
+  }
+
+  // --- GESTIÓN DE FECHAS ---
+  Future<void> _seleccionarFecha(bool esEntrega) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: esEntrega
+          ? (_fechaEntrega ?? DateTime.now())
+          : (_fechaPedido ?? DateTime.now()),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      locale: const Locale('es', 'ES'),
+    );
+    if (picked != null) {
       setState(() {
-        _lineas[index] = lineaEditada;
+        if (esEntrega) {
+          _fechaEntrega = picked;
+        } else {
+          _fechaPedido = picked;
+        }
       });
     }
   }
 
-  double _calcularBaseImponible() {
-    return _lineas.fold(0, (total, linea) {
-      final subtotal = linea.cantidad * linea.precio;
-      final descuento = subtotal * (linea.descuento / 100);
-      return total + (subtotal - descuento);
+  // --- GESTIÓN DE FOTO ---
+  Future<void> _tomarFoto(ImageSource source) async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: source,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 70,
+      );
+      if (image == null) return;
+
+      final bytes = await File(image.path).readAsBytes();
+      final String base64String = base64Encode(bytes);
+
+      setState(() {
+        _fotoBase64 = base64String;
+        _fotoModificada = true;
+      });
+    } catch (e) {
+      print('Error cámara: $e');
+    }
+  }
+
+  void _borrarFoto() {
+    setState(() {
+      _fotoBase64 = null;
+      _fotoModificada = true; // Marcar para borrar en servidor
     });
   }
 
-  double _calcularTotalIva() {
-    return _lineas.fold(0, (totalIva, linea) {
-      final subtotal = linea.cantidad * linea.precio;
-      final descuento = subtotal * (linea.descuento / 100);
-      final baseLinea = subtotal - descuento;
-      final ivaLinea = baseLinea * (linea.porcentajeIva / 100);
-      return totalIva + ivaLinea;
-    });
-  }
-
-  double _calcularTotal() {
-    return _calcularBaseImponible() + _calcularTotalIva();
-  }
-
+  // --- GUARDAR CAMBIOS ---
   Future<void> _guardarCambios() async {
     if (_guardando) return;
 
@@ -306,7 +322,6 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
       ).showSnackBar(const SnackBar(content: Text('Selecciona un cliente')));
       return;
     }
-
     if (_lineas.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Agrega al menos un artículo')),
@@ -328,60 +343,78 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
       if (url.isEmpty || apiKey.isEmpty) {
         throw Exception('Configura la URL y API Key en Configuración');
       }
-
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://$url';
-      }
+      if (!url.startsWith('http')) url = 'https://$url';
 
       final apiService = VelneoAPIService(url, apiKey);
 
-      // Preparar datos del pedido para actualizar en la API
+      // 1. Preparar Datos
       final pedidoData = {
         'cliente_id': _clienteSeleccionado!['id'],
         'cmr': comercialId,
         'observaciones': _observacionesController.text,
-        'lineas': _lineas
-            .map(
-              (linea) => {
-                'articulo_id': linea.articulo['id'],
-                'cantidad': linea.cantidad,
-                'precio': linea.precio,
-                'tipo_iva': linea.tipoIva, // 🟢 Importante: enviar IVA
-              },
-            )
-            .toList(),
+        'direccion_entrega_id': _direccionEntregaId,
+        'serie_id': _serieSeleccionadaId,
+        'forma_pago': _formaPagoSeleccionadaId,
+        'fecha':
+            _fechaPedido?.toIso8601String() ?? DateTime.now().toIso8601String(),
+        'fecha_entrega': _fechaEntrega?.toIso8601String(),
+        'lineas': _lineas.map((linea) {
+          return {
+            'articulo_id': linea.articulo['id'],
+            'cantidad': linea.cantidad,
+            'precio': linea.precio,
+            'tipo_iva': linea.tipoIva,
+            'dto1': linea.dto1,
+            'dto2': linea.dto2,
+            'dto3': linea.dto3,
+            'por_dto': linea.descuento,
+          };
+        }).toList(),
       };
 
-      // Actualizar en Velneo API
+      // 2. Actualizar en API
       await apiService
           .actualizarPedido(widget.pedido['id'], pedidoData)
           .timeout(
             const Duration(seconds: 45),
-            onTimeout: () =>
-                throw Exception('Timeout: El servidor tardó demasiado'),
+            onTimeout: () => throw Exception('Timeout servidor'),
           );
 
-      // Actualizar en BD local
+      // 3. Actualizar Foto si cambió
+      if (_fotoModificada) {
+        await apiService.actualizarFotoPedido(
+          widget.pedido['id'],
+          _fotoBase64, // Si es null, la borrará
+        );
+      }
+
+      // 4. Actualizar BD Local
       final db = DatabaseHelper.instance;
       await db.actualizarPedido(widget.pedido['id'], {
         'cliente_id': _clienteSeleccionado!['id'],
         'observaciones': _observacionesController.text,
+        'direccion_entrega_id': _direccionEntregaId,
+        'serie_id': _serieSeleccionadaId,
+        'forma_pago': _formaPagoSeleccionadaId,
+        'fecha': _fechaPedido?.toIso8601String(),
+        'fecha_entrega': _fechaEntrega?.toIso8601String(),
         'total': _calcularTotal(),
-        'sincronizado': 1, // Marcar como sincronizado
+        'sincronizado': 1,
       });
 
-      // Actualizar líneas en BD local
+      // Reinsertar líneas locales
       await db.eliminarLineasPedido(widget.pedido['id']);
-
       for (var linea in _lineas) {
         await db.insertarLineaPedido({
           'pedido_id': widget.pedido['id'],
           'articulo_id': linea.articulo['id'],
           'cantidad': linea.cantidad,
           'precio': linea.precio,
+          'tipo_iva': linea.tipoIva,
           'por_descuento': linea.descuento,
-          'por_iva': linea.porcentajeIva,
-          'tipo_iva': linea.tipoIva, // 🟢 Guardar también en local
+          'dto1': linea.dto1,
+          'dto2': linea.dto2,
+          'dto3': linea.dto3,
         });
       }
 
@@ -391,27 +424,22 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
       });
 
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('✅ Pedido actualizado correctamente en el servidor'),
+          content: Text('✅ Pedido actualizado correctamente'),
           backgroundColor: Color(0xFF032458),
-          duration: Duration(seconds: 2),
         ),
       );
-
       Navigator.pop(context, true);
     } catch (e) {
       setState(() {
         _isLoading = false;
         _guardando = false;
       });
-
       if (!mounted) return;
-
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
+        builder: (_) => AlertDialog(
           title: const Text('Error'),
           content: Text(e.toString().replaceAll('Exception: ', '')),
           actions: [
@@ -429,28 +457,19 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Editar Pedido #${widget.pedido['id']}'),
+        title: Text('Editar Pedido ${widget.pedido['numero']}'),
         backgroundColor: const Color(0xFF162846),
-        actions: [
-          // 🟢 BOTÓN DE DEBUG JSON (NUEVO)
-          IconButton(
-            icon: const Icon(Icons.bug_report, color: Colors.orange),
-            onPressed: _mostrarDebugJson, // Llama al popup
-            tooltip: 'Ver JSON a enviar',
-          ),
-        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16.0),
               children: [
-                // Cliente
+                // CLIENTE
                 Card(
                   child: ListTile(
                     title: Text(
-                      _clienteSeleccionado?['nombre'] ??
-                          'Seleccionar cliente *',
+                      _clienteSeleccionado?['nombre'] ?? 'Cliente *',
                       style: TextStyle(
                         fontWeight: _clienteSeleccionado != null
                             ? FontWeight.bold
@@ -460,14 +479,152 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
                     subtitle: _clienteSeleccionado != null
                         ? Text('ID: ${_clienteSeleccionado!['id']}')
                         : null,
-                    leading: const Icon(Icons.business),
                     trailing: const Icon(Icons.search),
                     onTap: _seleccionarCliente,
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                // Observaciones
+                // DIRECCIÓN DE ENTREGA
+                if (_clienteSeleccionado != null &&
+                    _direccionesCliente.isNotEmpty)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      child: DropdownButtonFormField<int?>(
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Dirección de Entrega',
+                          border: InputBorder.none,
+                          icon: Icon(Icons.location_on, color: Colors.grey),
+                        ),
+                        value: _direccionEntregaId,
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('Dirección Principal'),
+                          ),
+                          ..._direccionesCliente.map((dir) {
+                            return DropdownMenuItem<int?>(
+                              value: dir['id'],
+                              child: Text(
+                                dir['direccion'],
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 2,
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                            );
+                          }),
+                        ],
+                        onChanged: (v) =>
+                            setState(() => _direccionEntregaId = v),
+                      ),
+                    ),
+                  ),
+
+                const SizedBox(height: 16),
+
+                // FECHAS Y SERIE
+                Row(
+                  children: [
+                    // Fecha Pedido
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => _seleccionarFecha(false),
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Fecha',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.calendar_today, size: 20),
+                          ),
+                          child: Text(
+                            _fechaPedido != null
+                                ? '${_fechaPedido!.day}/${_fechaPedido!.month}/${_fechaPedido!.year}'
+                                : '-',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Fecha Entrega
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => _seleccionarFecha(true),
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Entrega',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.local_shipping, size: 20),
+                          ),
+                          child: Text(
+                            _fechaEntrega != null
+                                ? '${_fechaEntrega!.day}/${_fechaEntrega!.month}/${_fechaEntrega!.year}'
+                                : 'Sin fecha',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // SERIE
+                if (_series.isNotEmpty)
+                  DropdownButtonFormField<int>(
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Serie',
+                      border: OutlineInputBorder(),
+                    ),
+                    value: _serieSeleccionadaId,
+                    items: _series.map((s) {
+                      return DropdownMenuItem<int>(
+                        value: s['id'],
+                        child: Text(
+                          s['nombre'],
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (v) => setState(() => _serieSeleccionadaId = v),
+                  ),
+                if (_series.isNotEmpty) const SizedBox(height: 16),
+
+                // FORMA DE PAGO
+                DropdownButtonFormField<int>(
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Forma de Pago',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.payment),
+                  ),
+                  value: _formaPagoSeleccionadaId,
+                  items: [
+                    const DropdownMenuItem<int>(
+                      value: null,
+                      child: Text('Sin especificar'),
+                    ),
+                    ..._formasPago.map(
+                      (f) => DropdownMenuItem<int>(
+                        value: f['id'],
+                        child: Text(
+                          f['nombre'],
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _formaPagoSeleccionadaId = v),
+                ),
+                const SizedBox(height: 16),
+
+                // OBSERVACIONES
                 TextField(
                   controller: _observacionesController,
                   decoration: const InputDecoration(
@@ -475,11 +632,90 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.note),
                   ),
-                  maxLines: 3,
+                  maxLines: 2,
                 ),
                 const SizedBox(height: 24),
 
-                // Título y botón agregar artículo
+                // SECCIÓN FOTO
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.camera_alt, color: Color(0xFF032458)),
+                            SizedBox(width: 8),
+                            Text(
+                              'Fotografía',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        if (_fotoBase64 != null)
+                          Stack(
+                            alignment: Alignment.topRight,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.memory(
+                                  base64Decode(_fotoBase64!),
+                                  height: 200,
+                                  width: double.infinity,
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.cancel,
+                                  color: Colors.red,
+                                  size: 30,
+                                ),
+                                onPressed: _borrarFoto,
+                              ),
+                            ],
+                          )
+                        else
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              ElevatedButton.icon(
+                                onPressed: () =>
+                                    _tomarFoto(ImageSource.gallery),
+                                icon: const Icon(Icons.photo_library),
+                                label: const Text('Galería'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.grey[200],
+                                  foregroundColor: Colors.black,
+                                ),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () => _tomarFoto(ImageSource.camera),
+                                icon: const Icon(Icons.camera_alt),
+                                label: const Text('Cámara'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.grey[200],
+                                  foregroundColor: Colors.black,
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // ARTÍCULOS
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -494,209 +730,62 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
                       onPressed: _agregarLinea,
                       icon: const Icon(Icons.add),
                       label: const Text('Agregar'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF032458),
-                        foregroundColor: Colors.white,
-                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
 
-                // Lista de artículos
                 if (_lineas.isEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(32),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[300]!),
-                    ),
-                    child: Center(
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.shopping_cart_outlined,
-                            size: 48,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'No hay artículos',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text('Sin artículos'),
                     ),
                   )
                 else
                   ..._lineas.asMap().entries.map((entry) {
                     final index = entry.key;
-                    final linea = entry.value;
-                    final subtotal = linea.cantidad * linea.precio;
-                    final descuento = subtotal * (linea.descuento / 100);
-                    final baseLinea = subtotal - descuento;
-                    final ivaLinea = baseLinea * (linea.porcentajeIva / 100);
-                    final totalLinea = baseLinea + ivaLinea;
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        leading: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF032458).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(
-                            Icons.inventory_2,
-                            color: Color(0xFF032458),
-                          ),
-                        ),
-                        title: Text(
-                          linea.articulo['nombre'],
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(
-                          '${linea.articulo['codigo']} - ${linea.cantidad} x ${linea.precio.toStringAsFixed(2)}€'
-                          '${linea.descuento > 0 ? ' (-${linea.descuento}%)' : ''}'
-                          '\nIVA: ${linea.tipoIva} (${linea.porcentajeIva}%)',
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  '${totalLinea.toStringAsFixed(2)}€',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF032458),
-                                  ),
-                                ),
-                                if (linea.descuento > 0 ||
-                                    linea.porcentajeIva > 0)
-                                  Text(
-                                    'Base: ${baseLinea.toStringAsFixed(2)}€',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(width: 8),
-                            PopupMenuButton(
-                              icon: const Icon(Icons.more_vert),
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                  value: 'editar',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.edit, size: 20),
-                                      SizedBox(width: 8),
-                                      Text('Editar'),
-                                    ],
-                                  ),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'eliminar',
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.delete,
-                                        size: 20,
-                                        color: Colors.red,
-                                      ),
-                                      SizedBox(width: 8),
-                                      Text(
-                                        'Eliminar',
-                                        style: TextStyle(color: Colors.red),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              onSelected: (value) {
-                                if (value == 'editar') {
-                                  _editarLinea(index);
-                                } else if (value == 'eliminar') {
-                                  _eliminarLinea(index);
-                                }
-                              },
-                            ),
-                          ],
-                        ),
-                        isThreeLine: true,
-                      ),
+                    return LineaPedidoWidget(
+                      linea: entry.value,
+                      onDelete: () => setState(() => _lineas.removeAt(index)),
+                      onEdit: () => _editarLinea(index),
+                      onUpdate: () => setState(() {}),
                     );
                   }),
 
                 const SizedBox(height: 16),
 
-                // Card de totales
+                // TOTAL
                 Card(
-                  margin: const EdgeInsets.symmetric(vertical: 16),
                   color: const Color(0xFF032458).withOpacity(0.05),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Column(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Base Imponible:'),
-                            Text(
-                              '${_calcularBaseImponible().toStringAsFixed(2)}€',
-                              style: const TextStyle(fontSize: 16),
-                            ),
-                          ],
+                        const Text(
+                          'TOTAL:',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('IVA:'),
-                            Text(
-                              '${_calcularTotalIva().toStringAsFixed(2)}€',
-                              style: const TextStyle(fontSize: 16),
-                            ),
-                          ],
-                        ),
-                        const Divider(height: 24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'TOTAL:',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              '${_calcularTotal().toStringAsFixed(2)}€',
-                              style: const TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF032458),
-                              ),
-                            ),
-                          ],
+                        Text(
+                          '${_calcularTotal().toStringAsFixed(2)}€',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF032458),
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
 
-                // Botón guardar
+                const SizedBox(height: 24),
+
+                // BOTÓN GUARDAR
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -707,16 +796,9 @@ class _EditarPedidoScreenState extends State<EditarPedidoScreen> {
                       foregroundColor: Colors.white,
                     ),
                     child: _guardando
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
+                        ? const CircularProgressIndicator(color: Colors.white)
                         : const Text(
-                            'Guardar Cambios',
+                            'GUARDAR CAMBIOS',
                             style: TextStyle(fontSize: 16),
                           ),
                   ),

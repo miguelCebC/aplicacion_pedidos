@@ -53,8 +53,9 @@ class DatabaseHelper {
     stock INTEGER DEFAULT 0,
     img TEXT,  
     familia TEXT,        
-        proveedor_id INTEGER, 
-        codigo_barras TEXT    
+    proveedor_id INTEGER, 
+    codigo_barras TEXT,    
+    off INTEGER DEFAULT 0
   )
 ''');
     await db.execute('''
@@ -65,7 +66,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // 🟢 NUEVA TABLA SERIES
     await db.execute('''
       CREATE TABLE series (
         id INTEGER PRIMARY KEY,
@@ -197,7 +197,7 @@ class DatabaseHelper {
         FOREIGN KEY (lead_id) REFERENCES leads (id)
       )
     ''');
-    // 🟢 Añadido serie_id a pedidos
+    // TABLA PEDIDOS CON NUEVO CAMPO
     await db.execute('''
       CREATE TABLE pedidos (
         id INTEGER PRIMARY KEY,
@@ -207,7 +207,12 @@ class DatabaseHelper {
         serie_id INTEGER, 
         fecha TEXT NOT NULL,
         numero TEXT, 
+        num_doc INTEGER,      
+        fecha_entrega TEXT,   
+        forma_pago INTEGER,
+        direccion_entrega_id INTEGER,
         estado TEXT,
+        con_kyr INTEGER DEFAULT 0, 
         observaciones TEXT,
         total REAL,
         sincronizado INTEGER DEFAULT 0,
@@ -217,6 +222,7 @@ class DatabaseHelper {
       )
     ''');
 
+    // TABLA LINEAS PEDIDO CON DTOS 1, 2, 3
     await db.execute('''
       CREATE TABLE lineas_pedido (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,11 +231,20 @@ class DatabaseHelper {
         cantidad REAL NOT NULL,
         precio REAL NOT NULL,
         por_descuento REAL DEFAULT 0,
+        dto1 REAL DEFAULT 0, -- 🟢 NUEVO
+        dto2 REAL DEFAULT 0, -- 🟢 NUEVO
+        dto3 REAL DEFAULT 0, -- 🟢 NUEVO
         por_iva REAL DEFAULT 0,
         tipo_iva TEXT DEFAULT 'G',
         FOREIGN KEY (pedido_id) REFERENCES pedidos (id),
         FOREIGN KEY (articulo_id) REFERENCES articulos (id)
       )
+    ''');
+    await db.execute('''
+    CREATE TABLE formas_pago (
+      id INTEGER PRIMARY KEY,
+      nombre TEXT NOT NULL
+    )
     ''');
 
     // 🟢 Añadido serie_id a presupuestos
@@ -303,7 +318,70 @@ class DatabaseHelper {
         valor TEXT
       )
     ''');
+    await db.execute('''
+      CREATE TABLE movimientos (
+        id INTEGER PRIMARY KEY,
+        cliente_id INTEGER,
+        articulo_id INTEGER,
+        fecha TEXT,
+        num_doc TEXT,
+        entrada REAL,
+        salida REAL,
+        precio REAL,
+        FOREIGN KEY (cliente_id) REFERENCES clientes (id),
+        FOREIGN KEY (articulo_id) REFERENCES articulos (id)
+      )
+    ''');
     print('✅ Base de datos creada correctamente');
+  }
+
+  Future<void> insertarMovimientosLote(
+    List<Map<String, dynamic>> movimientos,
+  ) async {
+    final db = await database;
+    final batch = db.batch();
+    for (var mov in movimientos) {
+      batch.insert(
+        'movimientos',
+        mov,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<String> obtenerNombreSerie(int serieId) async {
+    final db = await database;
+    final res = await db.query(
+      'series',
+      columns: ['nombre'],
+      where: 'id = ?',
+      whereArgs: [serieId],
+    );
+    if (res.isNotEmpty) return res.first['nombre'] as String;
+    return 'Serie $serieId';
+  }
+
+  Future<void> limpiarMovimientos() async {
+    final db = await database;
+    await db.delete('movimientos');
+  }
+
+  // Consulta con JOIN para sacar datos del artículo automáticamente
+  Future<List<Map<String, dynamic>>> obtenerMovimientosPorCliente(
+    int clienteId,
+  ) async {
+    final db = await database;
+    return await db.rawQuery(
+      '''
+      SELECT m.*, a.codigo as codigo_articulo, a.nombre as nombre_articulo
+      FROM movimientos m
+      LEFT JOIN articulos a ON m.articulo_id = a.id
+      WHERE m.cliente_id = ?
+      ORDER BY m.fecha DESC
+    ''',
+      [clienteId],
+    );
   }
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -416,6 +494,19 @@ class DatabaseHelper {
     await batch.commit(noResult: true);
   }
 
+  // 🟢 NUEVO: Obtener datos básicos de un artículo por su ID
+  Future<Map<String, dynamic>?> obtenerDatosArticulo(int id) async {
+    final db = await database;
+    final result = await db.query(
+      'articulos',
+      columns: ['codigo', 'nombre'], // Solo recuperamos lo necesario
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return result.isNotEmpty ? result.first : null;
+  }
+
   // 2. Obtener todos los contactos de un cliente (Teléfonos y Emails)
   Future<List<Map<String, dynamic>>> obtenerContactosPorCliente(
     int clienteId,
@@ -497,7 +588,9 @@ class DatabaseHelper {
   }) async {
     final db = await database;
 
-    String whereClause = 'nombre IS NOT NULL AND nombre != ""';
+    // 🟢 FILTRO LOCAL: Solo artículos activos
+    String whereClause =
+        'nombre IS NOT NULL AND nombre != "" AND (off IS NULL OR off = 0)';
     List<dynamic> args = [];
 
     if (busqueda != null && busqueda.isNotEmpty) {
@@ -508,7 +601,6 @@ class DatabaseHelper {
 
     return await db.query(
       'articulos',
-      // 🟢 LISTA BLANCA DE COLUMNAS (Todas menos 'img')
       columns: [
         'id',
         'codigo',
@@ -519,6 +611,7 @@ class DatabaseHelper {
         'familia',
         'proveedor_id',
         'codigo_barras',
+        'off',
       ],
       where: whereClause,
       whereArgs: args,
@@ -1149,19 +1242,19 @@ class DatabaseHelper {
     String? busqueda,
   ]) async {
     final db = await database;
+
+    // 🟢 FILTRO LOCAL
+    String baseWhere =
+        'nombre IS NOT NULL AND nombre != "" AND (off IS NULL OR off = 0)';
+
     if (busqueda != null && busqueda.isNotEmpty) {
       return await db.query(
         'articulos',
-        where:
-            '(nombre LIKE ? OR codigo LIKE ? OR id LIKE ?) AND nombre IS NOT NULL AND nombre != ""',
+        where: '$baseWhere AND (nombre LIKE ? OR codigo LIKE ? OR id LIKE ?)',
         whereArgs: ['%$busqueda%', '%$busqueda%', '%$busqueda%'],
       );
     }
-    return await db.query(
-      'articulos',
-      where: 'nombre IS NOT NULL AND nombre != ""',
-      orderBy: 'nombre',
-    );
+    return await db.query('articulos', where: baseWhere, orderBy: 'nombre');
   }
 
   Future<int> insertarUsuario(Map<String, dynamic> usuario) async {
@@ -1184,6 +1277,10 @@ class DatabaseHelper {
 
   Future<int> insertarLineaPedido(Map<String, dynamic> linea) async {
     final db = await database;
+    // Asegurar que los campos existen en el mapa o poner 0
+    if (!linea.containsKey('dto1')) linea['dto1'] = 0.0;
+    if (!linea.containsKey('dto2')) linea['dto2'] = 0.0;
+    if (!linea.containsKey('dto3')) linea['dto3'] = 0.0;
     return await db.insert('lineas_pedido', linea);
   }
 
@@ -1220,6 +1317,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (var linea in lineas) {
+      // Asegurar campos
+      if (!linea.containsKey('dto1')) linea['dto1'] = 0.0;
+      if (!linea.containsKey('dto2')) linea['dto2'] = 0.0;
+      if (!linea.containsKey('dto3')) linea['dto3'] = 0.0;
+
       batch.insert(
         'lineas_pedido',
         linea,
@@ -1242,6 +1344,13 @@ class DatabaseHelper {
       );
     }
     await batch.commit(noResult: true);
+  }
+
+  Future<String> obtenerDireccionPorId(int id) async {
+    final db = await database;
+    final res = await db.query('direcciones', where: 'id = ?', whereArgs: [id]);
+    if (res.isNotEmpty) return res.first['direccion'] as String;
+    return 'Dirección desconocida';
   }
 
   Future<int> actualizarPedido(int pedidoId, Map<String, dynamic> datos) async {
@@ -1491,6 +1600,57 @@ class DatabaseHelper {
     );
   }
 
+  Future<void> insertarFormasPagoLote(List<Map<String, dynamic>> list) async {
+    final db = await database;
+    final batch = db.batch();
+    // Borramos lo anterior para tener una copia limpia del servidor
+    await db.delete('formas_pago');
+    for (var item in list) {
+      batch.insert(
+        'formas_pago',
+        item,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Map<String, dynamic>>> obtenerFormasPago() async {
+    final db = await database;
+    return await db.query('formas_pago', orderBy: 'nombre');
+  }
+
+  Future<String> obtenerNombreFormaPago(int id) async {
+    final db = await database;
+    final res = await db.query(
+      'formas_pago',
+      columns: ['nombre'],
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (res.isNotEmpty) return res.first['nombre'] as String;
+    return 'Forma Pago $id';
+  }
+
+  Future<int> actualizarImagenArticulo(int id, String imagenBase64) async {
+    final db = await database;
+    return await db.update(
+      'Articulos',
+      {'img': imagenBase64},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> eliminarContrasenaLocal() async {
+    final db = await database;
+    await db.delete(
+      'config_local',
+      where: 'clave = ?',
+      whereArgs: ['contrasena_local'],
+    );
+  }
+
   Future<void> cargarDatosPrueba() async {
     // ... (Datos de prueba existentes) ...
     final db = await database;
@@ -1507,7 +1667,7 @@ class DatabaseHelper {
       'direccion': 'Calle Mayor 1, Madrid',
     });
     // ... más datos de prueba ...
-    // 🟢 Datos de prueba para series
+
     await db.insert('series', {
       'id': 1,
       'nombre': 'Ventas General',

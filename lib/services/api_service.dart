@@ -9,6 +9,12 @@ class VelneoAPIService {
   final http.Client _client = http.Client();
   final Function(String)? onLog;
 
+  static int _fallosConsecutivos = 0;
+  static const int _limiteFallos = 5; // A los 5 fallos seguidos, se cierra
+
+  // Callback estático para avisar a la UI que debe cerrarse
+  static Function(String motivo)? onCierreForzoso;
+
   VelneoAPIService(this.baseUrl, this.apiKey, {this.onLog});
 
   void _log(String message) {
@@ -32,14 +38,17 @@ class VelneoAPIService {
           ((X509Certificate cert, String host, int port) => true);
 
     try {
+      // Configuración de timeout corto para no hacer esperar mucho al usuario
       final request = await httpClient.getUrl(Uri.parse(url));
       request.headers.set('Accept', 'application/json');
       request.headers.set('User-Agent', 'Flutter App');
 
-      final response = await request.close();
+      final response = await request.close().timeout(
+        const Duration(seconds: 15),
+      );
       final stringData = await response.transform(utf8.decoder).join();
 
-      return http.Response(
+      final httpResponse = http.Response(
         stringData,
         response.statusCode,
         headers: {
@@ -47,6 +56,38 @@ class VelneoAPIService {
               response.headers.contentType?.toString() ?? 'application/json',
         },
       );
+
+      // SI LLEGAMOS AQUÍ, LA CONEXIÓN TÉCNICA FUE EXITOSA
+
+      // Si el servidor responde (aunque sea 404 o 500), técnicamente hay conexión.
+      // Pero si es un error grave (500) o de red, consideramos fallo.
+      if (httpResponse.statusCode >= 200 && httpResponse.statusCode < 500) {
+        // ✅ ÉXITO: Reseteamos el contador global
+        if (_fallosConsecutivos > 0) {
+          _log('✅ Conexión recuperada. Contador de fallos reseteado.');
+          _fallosConsecutivos = 0;
+        }
+        return httpResponse;
+      } else {
+        throw Exception('Error servidor ${httpResponse.statusCode}');
+      }
+    } catch (e) {
+      // ❌ FALLO DETECTADO
+      _fallosConsecutivos++;
+      _log('⚠️ Fallo de conexión #$_fallosConsecutivos / $_limiteFallos: $e');
+
+      // 🟢 VERIFICAR SI SUPERAMOS EL LÍMITE
+      if (_fallosConsecutivos >= _limiteFallos) {
+        _log('⛔ LÍMITE DE FALLOS ALCANZADO. SOLICITANDO CIERRE.');
+        if (onCierreForzoso != null) {
+          onCierreForzoso!(
+            'Se ha perdido la conexión con el servidor tras $_limiteFallos intentos fallidos.',
+          );
+        }
+      }
+
+      // Re-lanzamos el error para que la pantalla local sepa que falló esta petición concreta
+      rethrow;
     } finally {
       httpClient.close();
     }
@@ -68,10 +109,10 @@ class VelneoAPIService {
     if (valor is String) return double.tryParse(valor) ?? 0.0;
     return 0.0;
   }
-
-  // 🟢 REEMPLAZAR el método obtenerArticulos() completo en lib/services/api_service.dart
+  // En lib/services/api_service.dart
 
   // En lib/services/api_service.dart
+
   Future<List<dynamic>> obtenerArticulos() async {
     try {
       final allArticulos = <dynamic>[];
@@ -79,26 +120,18 @@ class VelneoAPIService {
       const int pageSize = 1000;
       int totalCount = 0;
 
-      _log('📦 Descargando artículos (ACTIVOS)...');
+      _log('📦 Descargando artículos (Todos, con campo OFF)...');
 
       while (true) {
-        final StringBuffer urlBuffer = StringBuffer();
-        urlBuffer.write('$baseUrl/ART_M');
+        // 🟢 PEDIMOS EL CAMPO 'off' Y QUITAMOS FILTROS
+        final url = _buildUrlWithParams('/art_m', {
+          'fields':
+              'id,ref,name,pvp,exs,fam,prv,cod_bar,off', // <--- Pedimos 'off'
+          'page[size]': pageSize.toString(),
+          'page[number]': page.toString(),
+        });
 
-        // Campos solicitados
-        urlBuffer.write('?fields=id,ref,name,pvp,exs,fam,prv,cod_bar');
-
-        // 🟢 CORRECCIÓN: Usamos 'filter' en lugar de 'index'
-        // Esto filtra los artículos donde el campo 'off' es false (activos)
-        urlBuffer.write('&filter[off]=false');
-
-        urlBuffer.write('&api_key=$apiKey');
-        urlBuffer.write('&page[size]=$pageSize');
-        urlBuffer.write('&page[number]=$page');
-
-        final url = urlBuffer.toString();
-
-        _log('  📄 Página $page');
+        _log('  📄 Página $page - URL: $url');
 
         try {
           final response = await _getWithSSL(
@@ -112,28 +145,45 @@ class VelneoAPIService {
               totalCount = data['total_count'];
             }
 
-            if (data['art_m'] != null && data['art_m'] is List) {
-              final articulosList = data['art_m'] as List;
+            final listaRaw = data['art_m'] ?? data['ART_M'];
+
+            if (listaRaw != null && listaRaw is List) {
+              final articulosList = listaRaw;
 
               if (articulosList.isEmpty) break;
 
               final articulos = articulosList.map((articulo) {
+                // 🟢 DETECTAR VALOR OFF (Boolean o String)
+                // Velneo puede devolver true/false o "true"/"false". SQLite necesita 1/0.
+                dynamic offRaw = articulo['off'] ?? articulo['OFF'];
+                int offVal = 0;
+                if (offRaw == true ||
+                    offRaw.toString().toLowerCase() == 'true') {
+                  offVal = 1;
+                }
+
                 return {
-                  'id': articulo['id'],
-                  'codigo': articulo['ref'] ?? '',
-                  'nombre': articulo['name'] ?? 'Sin nombre',
-                  'descripcion': articulo['name'] ?? '',
-                  'precio': _convertirADouble(articulo['pvp']),
-                  'stock': articulo['exs'] ?? 0,
+                  'id': articulo['id'] ?? articulo['ID'],
+                  'codigo': articulo['ref'] ?? articulo['REF'] ?? '',
+                  'nombre':
+                      articulo['name'] ?? articulo['NAME'] ?? 'Sin nombre',
+                  'descripcion': articulo['name'] ?? articulo['NAME'] ?? '',
+                  'precio': _convertirADouble(
+                    articulo['pvp'] ?? articulo['PVP'],
+                  ),
+                  'stock': articulo['exs'] ?? articulo['EXS'] ?? 0,
                   'img': '',
-                  'familia': articulo['fam'] ?? '',
-                  'proveedor_id': articulo['prv'] ?? 0,
-                  'codigo_barras': articulo['cod_bar'] ?? '',
+                  'familia': articulo['fam'] ?? articulo['FAM'] ?? '',
+                  'proveedor_id': articulo['prv'] ?? articulo['PRV'] ?? 0,
+                  'codigo_barras':
+                      articulo['cod_bar'] ?? articulo['COD_BAR'] ?? '',
+                  'off':
+                      offVal, // 🟢 Guardamos el estado (0=Activo, 1=Inactivo)
                 };
               }).toList();
 
               allArticulos.addAll(articulos);
-              _log('    -> Recibidos ${articulos.length} artículos activos');
+              _log('    -> Recibidos ${articulos.length} artículos');
 
               if (articulos.length < pageSize) break;
               if (totalCount > 0 && allArticulos.length >= totalCount) break;
@@ -148,20 +198,18 @@ class VelneoAPIService {
           }
         } catch (e) {
           _log('❌ Error en página $page: $e');
-          if (allArticulos.isEmpty) rethrow;
-          break;
+          if (allArticulos.isNotEmpty) break;
+          rethrow;
         }
       }
 
-      _log('✅ Total artículos activos descargados: ${allArticulos.length}');
+      _log('✅ Total artículos descargados: ${allArticulos.length}');
       return allArticulos;
     } catch (e) {
       _log('❌ Error en obtenerArticulos: $e');
       rethrow;
     }
   }
-
-  // En lib/services/api_service.dart
 
   Future<Map<String, dynamic>> obtenerClientes() async {
     try {
@@ -204,7 +252,6 @@ class VelneoAPIService {
 
               if (entidadesList.isEmpty) break;
 
-              // ... dentro de obtenerClientes ...
               for (var entidad in entidadesList) {
                 String nombreFinal =
                     (entidad['nom_fis'] != null &&
@@ -267,6 +314,149 @@ class VelneoAPIService {
       return {'clientes': allClientes, 'comerciales': allComerciales};
     } catch (e) {
       _log('❌ Error en obtenerClientes: $e');
+      rethrow;
+    }
+  }
+  // En lib/services/api_service.dart
+
+  // 🟢 DESCARGAR MOVIMIENTOS (Para Sincronización)
+  Future<List<dynamic>> obtenerMovimientos([DateTime? desde]) async {
+    try {
+      final allMovs = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+      bool deberiasContinuar = true;
+
+      _log('📦 Descargando movimientos (MOV_G)...');
+
+      while (deberiasContinuar) {
+        final params = {
+          'fields':
+              'id,clt,art,fch,can_ent,can_sal,pre,num_doc,mod_tim', // Campos necesarios
+          'page[size]': pageSize.toString(),
+          'page[number]': page.toString(),
+          'sort': '-fch', // Ordenar por fecha (más reciente primero)
+        };
+
+        // URL segura
+        final url = _buildUrlWithParams('/MOV_G', params);
+
+        _log('  📄 Página $page');
+
+        final response = await _getWithSSL(
+          url,
+        ).timeout(const Duration(seconds: 60));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final listaRaw = data['mov_g'] ?? data['MOV_G'];
+
+          if (listaRaw != null && listaRaw is List) {
+            if (listaRaw.isEmpty) break;
+
+            final lista = listaRaw.map((mov) {
+              return {
+                'id': mov['id'] ?? mov['ID'],
+                'cliente_id': mov['clt'] ?? mov['CLT'] ?? 0,
+                'articulo_id': mov['art'] ?? mov['ART'] ?? 0,
+                'fecha': mov['fch'] ?? mov['FCH'] ?? '',
+                'num_doc': mov['num_doc'] ?? mov['NUM_DOC'] ?? '',
+                'entrada': _convertirADouble(mov['can_ent'] ?? mov['CAN_ENT']),
+                'salida': _convertirADouble(mov['can_sal'] ?? mov['CAN_SAL']),
+                'precio': _convertirADouble(mov['pre'] ?? mov['PRE']),
+              };
+            }).toList();
+
+            // Filtro de fecha si es incremental
+            if (desde != null) {
+              // Lógica incremental simple: si encontramos un registro más viejo que 'desde', paramos.
+              // (Asumiendo que 'mod_tim' o 'fch' son fiables)
+              // ...
+            }
+
+            allMovs.addAll(lista);
+            _log('    -> ${lista.length} movimientos recuperados');
+
+            if (lista.length < pageSize) break;
+            page++;
+          } else {
+            break;
+          }
+        } else {
+          throw Exception('Error HTTP ${response.statusCode}');
+        }
+      }
+
+      _log('✅ Total movimientos descargados: ${allMovs.length}');
+      return allMovs;
+    } catch (e) {
+      _log('❌ Error en obtenerMovimientos: $e');
+      rethrow;
+    }
+  }
+
+  // 🟢 OBTENER MOVIMIENTOS (Base de Conocimiento)
+  // No guarda en BD, solo devuelve la lista para mostrar
+  Future<List<dynamic>> obtenerMovimientosCliente(int clienteId) async {
+    try {
+      final allMovs = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+
+      _log('📄 Descargando historial de movimientos del cliente $clienteId...');
+
+      while (true) {
+        // Pedimos los campos exactos que has indicado
+        final url = _buildUrlWithParams('/MOV_G', {
+          'filter[clt]': clienteId.toString(),
+          'fields': 'id,art,fch,can_ent,can_sal,pre,num_doc',
+          'page[size]': pageSize.toString(),
+          'page[number]': page.toString(),
+          'sort': '-fch', // Ordenar por fecha (más reciente primero)
+        });
+
+        final response = await _getWithSSL(
+          url,
+        ).timeout(const Duration(seconds: 45));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+
+          // Tu JSON devuelve "mov_g"
+          final listaRaw = data['mov_g'] ?? data['MOV_G'];
+
+          if (listaRaw != null && listaRaw is List) {
+            if (listaRaw.isEmpty) break;
+
+            final lista = listaRaw.map((mov) {
+              return {
+                'id': mov['id'],
+                'articulo_id': mov['art'] ?? 0, // ID para buscar luego en local
+                'fecha': mov['fch'] ?? '',
+                'num_doc': mov['num_doc'] ?? '',
+                // Convertimos strings numéricos a double
+                'entrada': _convertirADouble(mov['can_ent']),
+                'salida': _convertirADouble(mov['can_sal']),
+                'precio': _convertirADouble(mov['pre']),
+              };
+            }).toList();
+
+            allMovs.addAll(lista);
+
+            if (lista.length < pageSize) break;
+            page++;
+          } else {
+            break;
+          }
+        } else {
+          throw Exception('Error HTTP ${response.statusCode}');
+        }
+      }
+
+      _log('✅ Total movimientos recuperados: ${allMovs.length}');
+      return allMovs;
+    } catch (e) {
+      _log('❌ Error en obtenerMovimientosCliente: $e');
       rethrow;
     }
   }
@@ -387,19 +577,34 @@ class VelneoAPIService {
               }
 
               final pedidosList = listaPedidos.map((pedido) {
+                dynamic conKyrRaw = pedido['con_kyr'] ?? pedido['CON_KYR'];
+                int conKyr = 0;
+                if (conKyrRaw == true ||
+                    conKyrRaw == 1 ||
+                    conKyrRaw.toString() == 'true') {
+                  conKyr = 1;
+                }
+
                 return {
                   'id': pedido['id'],
                   'cliente_id': pedido['clt'] ?? 0,
                   'cmr': pedido['cmr'] ?? 0,
+                  'serie_id': pedido['ser'] ?? 0,
                   'fecha': pedido['fch'] ?? DateTime.now().toIso8601String(),
                   'numero': pedido['num_ped'] ?? '',
+                  'num_doc': pedido['num_doc'] ?? 0,
+                  'fecha_entrega': pedido['fch_ent'],
+                  'forma_pago': pedido['fpg'] ?? 0,
+                  'direccion_entrega_id': pedido['dir_env'] ?? 0,
                   'estado': pedido['est'] ?? '',
+
+                  'con_kyr': conKyr, // 🟢 GUARDAMOS EL DATO
+
                   'observaciones': pedido['obs'] ?? '',
                   'total': _convertirADouble(pedido['tot_ped']),
                   'sincronizado': 1,
                 };
               }).toList();
-
               allPedidos.addAll(pedidosList);
               _log(
                 '  ✅ Página $page: ${pedidosList.length} pedidos (Acumulado: ${allPedidos.length}/$totalCount)',
@@ -442,7 +647,119 @@ class VelneoAPIService {
       rethrow;
     }
   }
+
   // En lib/services/api_service.dart
+  // 🟢 1. OBTENER FORMAS DE PAGO (Con estructura: id, name)
+  Future<List<dynamic>> obtenerFormasPago() async {
+    try {
+      final allItems = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+
+      _log('📦 Descargando formas de pago...');
+
+      while (true) {
+        // Pedimos ID y NAME (según tu JSON)
+        final url = _buildUrlWithParams('/FPG_M', {
+          'fields': 'id,name',
+          'page[size]': pageSize.toString(),
+          'page[number]': page.toString(),
+        });
+
+        final response = await _getWithSSL(
+          url,
+        ).timeout(const Duration(seconds: 30));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          // Buscamos la lista (fpg_m o FPG_M)
+          final listaRaw = data['fpg_m'] ?? data['FPG_M'];
+
+          if (listaRaw != null && listaRaw is List) {
+            if (listaRaw.isEmpty) break;
+
+            final lista = listaRaw.map((item) {
+              return {
+                'id': item['id'],
+                // 🟢 IMPORTANTE: Leemos 'name' como indica tu JSON
+                'nombre': item['name'] ?? item['NAME'] ?? 'Sin nombre',
+              };
+            }).toList();
+
+            allItems.addAll(lista);
+            if (lista.length < pageSize) break;
+            page++;
+          } else {
+            break;
+          }
+        } else {
+          throw Exception('Error HTTP ${response.statusCode}');
+        }
+      }
+      _log('✅ Formas de pago descargadas: ${allItems.length}');
+      return allItems;
+    } catch (e) {
+      _log('❌ Error en obtenerFormasPago: $e');
+      return [];
+    }
+  }
+
+  // 🟢 2. OBTENER SERIES (Asumiendo misma estructura: id, name)
+  Future<List<dynamic>> obtenerSeries() async {
+    try {
+      final allSeries = <dynamic>[];
+      int page = 1;
+      const int pageSize = 1000;
+
+      _log('📦 Descargando series...');
+
+      while (true) {
+        final url = _buildUrlWithParams('/SER_M', {
+          'fields':
+              'id,name,ser_tip', // Pedimos name y también el tipo si existe
+          'page[size]': pageSize.toString(),
+          'page[number]': page.toString(),
+        });
+
+        final response = await _getWithSSL(
+          url,
+        ).timeout(const Duration(seconds: 30));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final listaRaw = data['ser_m'] ?? data['SER_M'];
+
+          if (listaRaw != null && listaRaw is List) {
+            if (listaRaw.isEmpty) break;
+
+            final lista = listaRaw.map((serie) {
+              return {
+                'id': serie['id'],
+                // 🟢 IMPORTANTE: Leemos 'name'
+                'nombre':
+                    serie['name'] ?? serie['NAME'] ?? 'Serie ${serie['id']}',
+                // Tipo (Ventas/Compras) si viniera, sino por defecto
+                'tipo': serie['ser_tip'] ?? 'V',
+              };
+            }).toList();
+
+            allSeries.addAll(lista);
+            if (lista.length < pageSize) break;
+            page++;
+          } else {
+            break;
+          }
+        } else {
+          throw Exception('Error HTTP ${response.statusCode}');
+        }
+      }
+      _log('✅ Series descargadas: ${allSeries.length}');
+      return allSeries;
+    } catch (e) {
+      _log('❌ Error en obtenerSeries: $e');
+      return [];
+    }
+  }
 
   // 🟢 MÉTODO NUEVO: Descargar Contactos
   Future<List<Map<String, dynamic>>> obtenerContactos() async {
@@ -509,7 +826,6 @@ class VelneoAPIService {
     }
   }
 
-  // Actualizar pedido existente
   Future<Map<String, dynamic>> actualizarPedido(
     int pedidoId,
     Map<String, dynamic> pedido,
@@ -521,12 +837,21 @@ class VelneoAPIService {
         'clt': pedido['cliente_id'],
       };
 
+      if (pedido['direccion_entrega_id'] != null &&
+          pedido['direccion_entrega_id'] != 0) {
+        pedidoVelneo['dir_env'] = pedido['direccion_entrega_id'];
+      }
       if (pedido['cmr'] != null) pedidoVelneo['cmr'] = pedido['cmr'];
       if (pedido['observaciones'] != null) {
         pedidoVelneo['obs'] = pedido['observaciones'];
       }
 
-      print('📝 Actualizando pedido #$pedidoId en Velneo');
+      // Enviar estado 'con_kyr' si existe
+      if (pedido['con_kyr'] != null) {
+        pedidoVelneo['con_kyr'] = pedido['con_kyr'];
+      }
+
+      print('📝 Actualizando pedido #$pedidoId: $pedidoVelneo');
 
       final httpClient = HttpClient()
         ..badCertificateCallback =
@@ -534,25 +859,23 @@ class VelneoAPIService {
         ..connectionTimeout = const Duration(seconds: 45);
 
       try {
-        // 1. Obtener líneas actuales
-        final lineasActuales = await obtenerLineasPedido(pedidoId);
-
-        // 2. Eliminar líneas antiguas
-        print('🗑️ Eliminando ${lineasActuales.length} líneas antiguas...');
-        for (var linea in lineasActuales) {
-          if (linea['id'] != null) {
-            final request = await httpClient.deleteUrl(
-              Uri.parse(_buildUrl('/VTA_PED_LIN_G/${linea['id']}')),
-            );
-            request.headers.set('Accept', 'application/json');
-            final response = await request.close();
-            await response.drain();
+        // 1. Borrar líneas antiguas si se envían líneas nuevas
+        if (pedido.containsKey('lineas')) {
+          final lineasActuales = await obtenerLineasPedido(pedidoId);
+          for (var linea in lineasActuales) {
+            if (linea['id'] != null) {
+              final reqDel = await httpClient.deleteUrl(
+                Uri.parse(_buildUrl('/VTA_PED_LIN_G/${linea['id']}')),
+              );
+              reqDel.headers.set('Accept', 'application/json');
+              final resDel = await reqDel.close();
+              await resDel.drain();
+            }
           }
+          await Future.delayed(const Duration(milliseconds: 200));
         }
 
-        await Future.delayed(const Duration(milliseconds: 200));
-
-        // 3. Actualizar Cabecera
+        // 2. Actualizar Cabecera
         final request = await httpClient.postUrl(
           Uri.parse(_buildUrl('/VTA_PED_G/$pedidoId')),
         );
@@ -564,30 +887,24 @@ class VelneoAPIService {
         final stringData = await response.transform(utf8.decoder).join();
 
         if (response.statusCode == 200 || response.statusCode == 201) {
-          print('   ✅ Cabecera actualizada');
-
-          // 4. Crear nuevas líneas
+          // 3. Crear nuevas líneas
           int lineasOk = 0;
           if (pedido['lineas'] != null) {
             for (var linea in pedido['lineas']) {
               try {
-                final nuevaLinea = {
-                  'articulo_id': linea['articulo_id'],
-                  'cantidad': (linea['cantidad'] as num).toDouble(),
-                  'precio': (linea['precio'] as num).toDouble(),
-                  'tipo_iva': linea['tipo_iva'] ?? 'G', // Pasamos el dato
-                };
-                // crearLineaPedido se encargará de ponerlo en 'reg_iva_vta'
-                await crearLineaPedido(pedidoId, nuevaLinea);
+                await crearLineaPedido(pedidoId, linea);
                 lineasOk++;
               } catch (e) {
-                print('   ⚠️ Error creando línea: $e');
+                print('   ⚠️ Error línea: $e');
               }
             }
           }
+          // 🟢 RETORNO EXITOSO
           return {'id': pedidoId, 'lineas_creadas': lineasOk, 'success': true};
+        } else {
+          // 🔴 ERROR SI NO ES 200/201
+          throw Exception('Error HTTP ${response.statusCode}: $stringData');
         }
-        throw Exception('Error HTTP ${response.statusCode}: $stringData');
       } finally {
         httpClient.close();
       }
@@ -708,76 +1025,92 @@ class VelneoAPIService {
     }
   }
 
-  Future<List<dynamic>> obtenerSeries() async {
+  // 🟢 1. OBTENER FOTO PEDIDO (Sin guardar en local)
+  Future<String?> obtenerFotoPedido(int pedidoId) async {
     try {
-      final allSeries = <dynamic>[];
-      int page = 1;
-      const int pageSize = 1000;
+      // Pedimos solo el campo 'fot' para no traer datos innecesarios
+      final url = _buildUrl('/VTA_PED_G/$pedidoId') + '&fields=id,fot';
 
-      _log('📄 Descargando series...');
+      print('📸 Descargando foto del pedido #$pedidoId...');
 
-      while (true) {
-        final url = _buildUrlWithParams('/SER_M', {
-          'page[number]': page.toString(),
-          'page[size]': pageSize.toString(),
-        });
+      final response = await _getWithSSL(
+        url,
+      ).timeout(const Duration(seconds: 30));
 
-        _log('  📥 Página $page - URL: $url');
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
 
-        try {
-          final response = await _getWithSSL(
-            url,
-          ).timeout(const Duration(seconds: 45));
+        // Lógica para extraer el dato sea cual sea el formato de respuesta
+        Map<String, dynamic>? registro;
 
-          if (response.statusCode == 200) {
-            final data = json.decode(response.body);
-
-            if (data['ser_m'] != null && data['ser_m'] is List) {
-              final seriesList = (data['ser_m'] as List).map((serie) {
-                return {
-                  'id': serie['id'],
-                  'nombre': serie['name'] ?? 'Sin nombre',
-                  'tipo':
-                      serie['ser_tip'] ??
-                      '', // 'V' para ventas, 'C' para compras
-                };
-              }).toList();
-
-              if (seriesList.isEmpty) {
-                _log('  🏁 No hay más series');
-                break;
-              }
-
-              allSeries.addAll(seriesList);
-              _log('  ✅ Página $page: ${seriesList.length} series');
-
-              if (seriesList.length < pageSize) break;
-
-              page++;
-              await Future.delayed(const Duration(milliseconds: 200));
-            } else {
-              _log('  ⚠️ No se encontraron series');
-              break;
-            }
-          } else {
-            throw Exception('Error HTTP ${response.statusCode}');
+        if (data is Map<String, dynamic>) {
+          if (data.containsKey('id')) {
+            registro = data;
+          } else if (data['vta_ped_g'] != null &&
+              (data['vta_ped_g'] is List) &&
+              (data['vta_ped_g'] as List).isNotEmpty) {
+            registro = data['vta_ped_g'][0];
           }
-        } catch (e) {
-          _log('  ❌ Error en página $page: $e');
-          if (allSeries.isEmpty) rethrow;
-          break;
+        }
+
+        if (registro != null) {
+          final foto = registro['fot'] as String?;
+          if (foto != null && foto.isNotEmpty) {
+            print('✅ Foto encontrada (${foto.length} caracteres)');
+            return foto;
+          }
         }
       }
-
-      _log('✅ TOTAL series descargadas: ${allSeries.length}');
-      return allSeries;
+      print('⚠️ No hay foto o error en respuesta');
+      return null;
     } catch (e) {
-      _log('❌ Error en obtenerSeries: $e');
-      return [];
+      print('❌ Error obteniendo foto: $e');
+      return null;
     }
   }
 
-  // Eliminar líneas de pedido (DELETE) - SIN CAMBIOS
+  // 🟢 2. ACTUALIZAR FOTO PEDIDO (Subir o Borrar)
+  Future<bool> actualizarFotoPedido(int pedidoId, String? base64Foto) async {
+    final httpClient = HttpClient()
+      ..badCertificateCallback =
+          ((X509Certificate cert, String host, int port) => true)
+      ..connectionTimeout = const Duration(
+        seconds: 60,
+      ); // Más tiempo para subir imágenes
+
+    try {
+      print('📤 Subiendo/Actualizando foto pedido #$pedidoId...');
+
+      // Enviamos cadena vacía "" si base64Foto es null, para borrarla en Velneo
+      final bodyVelneo = {'fot': base64Foto ?? ""};
+
+      // Petición POST al recurso específico ID para hacer update parcial
+      final request = await httpClient.postUrl(
+        Uri.parse(_buildUrl('/VTA_PED_G/$pedidoId')),
+      );
+
+      request.headers.set('Content-Type', 'application/json');
+      request.headers.set('Accept', 'application/json');
+      request.write(json.encode(bodyVelneo));
+
+      final response = await request.close();
+      final stringData = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode == 200) {
+        print('✅ Foto actualizada correctamente en servidor');
+        return true;
+      } else {
+        print('❌ Error subiendo foto (${response.statusCode}): $stringData');
+        throw Exception('Error HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Excepción subiendo foto: $e');
+      return false;
+    } finally {
+      httpClient.close();
+    }
+  }
+
   Future<void> eliminarLineasPedido(int pedidoId) async {
     try {
       print('🗑️ Obteniendo líneas del pedido #$pedidoId para eliminar');
@@ -1042,6 +1375,9 @@ class VelneoAPIService {
                   'cantidad': _convertirADouble(linea['can_ped']),
                   'precio': _convertirADouble(linea['pre']),
                   'por_descuento': _convertirADouble(linea['por_dto']),
+                  'dto1': _convertirADouble(linea['dto1']),
+                  'dto2': _convertirADouble(linea['dto2']),
+                  'dto3': _convertirADouble(linea['dto3']),
                   'por_iva': _convertirADouble(linea['iva_pje']),
                   'tipo_iva': linea['reg_iva_vta'] ?? 'G',
                 };
@@ -1715,14 +2051,17 @@ class VelneoAPIService {
 
         if (data['vta_ped_lin_g'] != null && data['vta_ped_lin_g'] is List) {
           final lineasList = (data['vta_ped_lin_g'] as List).map((linea) {
-            _log('  → Línea ID: ${linea['id']} - Art ${linea['art']}');
             return {
-              'id': linea['id'], // <--- ¡IMPORTANTE! Necesario para borrar
+              'id': linea['id'],
               'pedido_id': linea['vta_ped'] ?? pedidoId,
               'articulo_id': linea['art'] ?? 0,
               'cantidad': _convertirADouble(linea['can_ped']),
               'precio': _convertirADouble(linea['pre']),
               'por_descuento': _convertirADouble(linea['por_dto']),
+              'dto1': _convertirADouble(linea['dto1']),
+              'dto2': _convertirADouble(linea['dto2']),
+              'dto3': _convertirADouble(linea['dto3']),
+              // ----------------
               'por_iva': _convertirADouble(linea['iva_pje']),
               'tipo_iva': linea['reg_iva_vta'] ?? 'G',
             };
@@ -1792,14 +2131,18 @@ class VelneoAPIService {
         'emp': '1',
         'emp_div': '1',
         'clt': pedido['cliente_id'],
+        'fch': pedido['fecha'],
       };
+
+      // 🟢 CAMBIO: Usamos 'dir_env'
+      if (pedido['direccion_entrega_id'] != null &&
+          pedido['direccion_entrega_id'] != 0) {
+        pedidoVelneo['dir_env'] = pedido['direccion_entrega_id'];
+      }
 
       if (pedido['cmr'] != null) {
         pedidoVelneo['cmr'] = pedido['cmr'];
-        print('📝 Asignando comercial ID: ${pedido['cmr']} al pedido');
       }
-
-      // 🟢 NUEVO: Asignar Serie
       if (pedido['serie_id'] != null) {
         pedidoVelneo['ser'] = pedido['serie_id'];
       }
@@ -1833,46 +2176,44 @@ class VelneoAPIService {
 
         if (response.statusCode == 200 || response.statusCode == 201) {
           final respuesta = json.decode(stringData);
-
           int? pedidoId;
-          if (respuesta['vta_ped_g'] != null &&
-              respuesta['vta_ped_g'] is List &&
-              (respuesta['vta_ped_g'] as List).isNotEmpty) {
-            pedidoId = respuesta['vta_ped_g'][0]['id'];
-          } else if (respuesta['id'] != null) {
-            pedidoId = respuesta['id'];
+
+          final listaRaw = respuesta['vta_ped_g'] ?? respuesta['VTA_PED_G'];
+
+          if (listaRaw != null &&
+              listaRaw is List &&
+              (listaRaw as List).isNotEmpty) {
+            final primerElemento = listaRaw[0];
+            pedidoId =
+                _parseIntSeguro(primerElemento['id']) ??
+                _parseIntSeguro(primerElemento['ID']);
+          } else {
+            pedidoId =
+                _parseIntSeguro(respuesta['id']) ??
+                _parseIntSeguro(respuesta['ID']);
+          }
+
+          if (pedidoId == null) {
+            throw Exception(
+              'No se pudo obtener el ID del pedido creado. Respuesta: $stringData',
+            );
           }
 
           print('✅ Pedido creado con ID: $pedidoId');
 
-          if (pedidoId == null) {
-            throw Exception('No se pudo obtener el ID del pedido creado');
-          }
-
           int lineasOk = 0;
-          int lineasError = 0;
-
           if (pedido['lineas'] != null) {
             for (var linea in pedido['lineas']) {
               try {
                 await crearLineaPedido(pedidoId, linea);
                 lineasOk++;
-                print('  ✓ Línea $lineasOk creada');
               } catch (e) {
-                lineasError++;
                 print('  ✗ Error línea: $e');
-                if (lineasOk == 0 && lineasError == pedido['lineas'].length) {
-                  throw Exception('No se pudo crear ninguna línea del pedido');
-                }
               }
             }
           }
 
-          return {
-            'id': pedidoId,
-            'lineas_creadas': lineasOk,
-            'lineas_error': lineasError,
-          };
+          return {'id': pedidoId, 'lineas_creadas': lineasOk, 'success': true};
         }
         throw Exception('Error HTTP ${response.statusCode}: $stringData');
       } finally {
@@ -1889,61 +2230,59 @@ class VelneoAPIService {
     Map<String, dynamic> linea,
   ) async {
     final httpClient = HttpClient()
-      ..badCertificateCallback =
-          ((X509Certificate cert, String host, int port) => true)
+      ..badCertificateCallback = ((cert, host, port) => true)
       ..connectionTimeout = const Duration(seconds: 30);
 
     try {
-      // Robustez para nombres de campos
-      final artId = linea['articulo_id'] ?? linea['art'];
-      final cantidad = linea['cantidad'] ?? linea['can_ped'];
-      final precio = linea['precio'] ?? linea['pre_ven'] ?? linea['pre'];
-
-      // Buscamos el IVA en cualquiera de sus posibles nombres
-      final tipoIva = linea['tipo_iva'] ?? linea['reg_iva_vta'] ?? 'G';
-
+      // Preparamos el objeto JSON con TODOS los campos necesarios
       final lineaVelneo = {
         'vta_ped': pedidoId,
         'emp': '1',
-        'art': artId,
-        'can_ped': _convertirADouble(cantidad),
-        'pre': _convertirADouble(precio),
-        'reg_iva_vta':
-            tipoIva, // 🟢 CORREGIDO: Nombre exacto del campo en Velneo
+        'art': linea['articulo_id'],
+        'can_ped': _convertirADouble(linea['cantidad']),
+        'pre': _convertirADouble(linea['precio']),
+        'reg_iva_vta': linea['tipo_iva'] ?? 'G', // IVA
+        // Descuentos en cascada
+        'dto1': _convertirADouble(linea['dto1']),
+        'dto2': _convertirADouble(linea['dto2']),
+        'dto3': _convertirADouble(linea['dto3']),
+
+        // Tipo de descuento (0=%, 1=Importe)
+        //'tip_dto': linea['tipo_dto'] ?? 0,
       };
 
-      if (linea['descuento'] != null || linea['por_dto'] != null) {
-        lineaVelneo['por_dto'] = _convertirADouble(
-          linea['descuento'] ?? linea['por_dto'],
-        );
+      // Compatibilidad: Si hay descuento general, lo mandamos también
+      if (linea['por_dto'] != null) {
+        lineaVelneo['por_dto'] = _convertirADouble(linea['por_dto']);
       }
 
-      final request = await httpClient
-          .postUrl(Uri.parse(_buildUrl('/VTA_PED_LIN_G')))
-          .timeout(const Duration(seconds: 30));
-
+      final request = await httpClient.postUrl(
+        Uri.parse(_buildUrl('/VTA_PED_LIN_G')),
+      );
       request.headers.set('Content-Type', 'application/json');
       request.headers.set('Accept', 'application/json');
-      request.headers.set('User-Agent', 'Flutter App');
       request.write(json.encode(lineaVelneo));
 
-      final response = await request.close().timeout(
-        const Duration(seconds: 30),
-      );
+      final response = await request.close();
       final stringData = await response.transform(utf8.decoder).join();
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
+      if (response.statusCode >= 200 && response.statusCode < 300) {
         return json.decode(stringData);
       }
-      throw Exception(
-        'Error al crear línea: ${response.statusCode} - $stringData',
-      );
-    } catch (e) {
-      print('❌ Error en crearLineaPedido: $e');
-      rethrow;
+      throw Exception('Error línea (${response.statusCode}): $stringData');
     } finally {
       httpClient.close();
     }
+  }
+
+  int? _parseIntSeguro(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is String) {
+      if (value.isEmpty) return null;
+      return int.tryParse(value);
+    }
+    return null;
   }
 
   Future<Map<String, dynamic>> crearPresupuesto(
@@ -2693,7 +3032,7 @@ class VelneoAPIService {
 
     try {
       while (true) {
-        final url = _buildUrlWithParams('/usr_m', {
+        final url = _buildUrlWithParams('/USR_M', {
           'page[number]': page.toString(),
           'page[size]': pageSize.toString(),
         });
@@ -2704,13 +3043,22 @@ class VelneoAPIService {
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
+          final listaRaw = data['USR_M'] ?? data['usr_m'];
 
-          if (data['usr_m'] != null && data['usr_m'] is List) {
-            final lista = data['usr_m'] as List;
+          if (listaRaw != null && listaRaw is List) {
+            final lista = listaRaw;
 
             if (lista.isEmpty) break;
 
-            allUsuarios.addAll(lista.cast<Map<String, dynamic>>());
+            final listaMapeada = lista.map((item) {
+              return {
+                'id': item['id'] ?? item['ID'],
+                'name': item['name'] ?? item['NAME'] ?? '',
+                'ent': item['ent'] ?? item['ENT'],
+              };
+            }).toList();
+
+            allUsuarios.addAll(listaMapeada.cast<Map<String, dynamic>>());
 
             if (lista.length < pageSize) break;
             page++;
@@ -2721,16 +3069,12 @@ class VelneoAPIService {
           throw Exception('Error HTTP ${response.statusCode}');
         }
       }
-
-      _log('✅ Total usuarios obtenidos: ${allUsuarios.length}');
       return allUsuarios;
     } catch (e) {
-      _log('❌ Error obteniendo usuarios: $e');
       throw Exception('Error al obtener usuarios: $e');
     }
   }
 
-  // Obtener todos los registros de usr_apl
   Future<List> obtenerTodosUsrApl() async {
     final allUsrApl = <Map<String, dynamic>>[];
     int page = 1;
@@ -2738,7 +3082,9 @@ class VelneoAPIService {
 
     try {
       while (true) {
-        final url = _buildUrlWithParams('/usr_apl', {
+        // 🟢 Usamos MAYÚSCULAS para la tabla y QUITAMOS el filtro 'fields'
+        // Esto asegura que baje todo el objeto tal cual
+        final url = _buildUrlWithParams('/USR_APL', {
           'page[number]': page.toString(),
           'page[size]': pageSize.toString(),
         });
@@ -2750,13 +3096,39 @@ class VelneoAPIService {
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
 
-          if (data['usr_apl'] != null && data['usr_apl'] is List) {
-            final lista = data['usr_apl'] as List;
+          // Intentamos leer con mayúsculas o minúsculas
+          final listaRaw = data['USR_APL'] ?? data['usr_apl'];
+
+          if (listaRaw != null && listaRaw is List) {
+            final lista = listaRaw;
 
             if (lista.isEmpty) break;
 
-            allUsrApl.addAll(lista.cast<Map<String, dynamic>>());
+            final listaMapeada = lista.map((item) {
+              // Mapeo flexible
+              final id = item['id'] ?? item['ID'];
+              final usrM = item['usr_m'] ?? item['USR_M'];
+              final aplTec = item['apl_tec'] ?? item['APL_TEC'];
 
+              // Campo OFF (opcional, por defecto false si no viene)
+              dynamic offRaw = item['off'] ?? item['OFF'];
+              bool offValue = false;
+              if (offRaw == true ||
+                  offRaw.toString().toLowerCase() == 'true' ||
+                  offRaw == 1 ||
+                  offRaw.toString() == '1') {
+                offValue = true;
+              }
+
+              return {
+                'id': id,
+                'usr_m': usrM,
+                'apl_tec': aplTec,
+                'off': offValue,
+              };
+            }).toList();
+
+            allUsrApl.addAll(listaMapeada);
             if (lista.length < pageSize) break;
             page++;
           } else {
@@ -2766,12 +3138,9 @@ class VelneoAPIService {
           throw Exception('Error HTTP ${response.statusCode}');
         }
       }
-
-      _log('✅ Total usr_apl obtenidos: ${allUsrApl.length}');
       return allUsrApl;
     } catch (e) {
-      _log('❌ Error obteniendo usr_apl: $e');
-      throw Exception('Error al obtener usr_apl: $e');
+      throw Exception('Error al obtener USR_APL: $e');
     }
   }
 

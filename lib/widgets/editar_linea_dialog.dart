@@ -6,7 +6,10 @@ class EditarLineaDialog extends StatefulWidget {
   final Map<String, dynamic> articulo;
   final double cantidad;
   final double precio;
-  final double descuento;
+  final double descuento; // Descuento General
+  final double dto1;
+  final double dto2;
+  final double dto3;
   final String tipoIva;
 
   const EditarLineaDialog({
@@ -15,6 +18,9 @@ class EditarLineaDialog extends StatefulWidget {
     required this.cantidad,
     required this.precio,
     this.descuento = 0.0,
+    this.dto1 = 0.0,
+    this.dto2 = 0.0,
+    this.dto3 = 0.0,
     this.tipoIva = 'G',
   });
 
@@ -26,6 +32,9 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
   late TextEditingController _cantidadController;
   late TextEditingController _precioController;
   late TextEditingController _descuentoController;
+  late TextEditingController _dto1Controller;
+  late TextEditingController _dto2Controller;
+  late TextEditingController _dto3Controller;
   late String _tipoIvaSeleccionado;
 
   @override
@@ -35,9 +44,15 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
       text: widget.cantidad.toString(),
     );
     _precioController = TextEditingController(text: widget.precio.toString());
+
+    // 🟢 Inicializamos los 4 controladores
     _descuentoController = TextEditingController(
       text: widget.descuento.toString(),
     );
+    _dto1Controller = TextEditingController(text: widget.dto1.toString());
+    _dto2Controller = TextEditingController(text: widget.dto2.toString());
+    _dto3Controller = TextEditingController(text: widget.dto3.toString());
+
     _tipoIvaSeleccionado = widget.tipoIva;
     _cargarConfiguracionIva();
   }
@@ -45,7 +60,7 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
   Future<void> _cargarConfiguracionIva() async {
     await IvaConfig.cargarConfiguracion();
     if (mounted) {
-      setState(() {}); // Refrescar para mostrar porcentajes actualizados
+      setState(() {});
     }
   }
 
@@ -54,6 +69,9 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
     _cantidadController.dispose();
     _precioController.dispose();
     _descuentoController.dispose();
+    _dto1Controller.dispose();
+    _dto2Controller.dispose();
+    _dto3Controller.dispose();
     super.dispose();
   }
 
@@ -75,39 +93,103 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
               style: TextStyle(color: Colors.grey[600], fontSize: 12),
             ),
             const SizedBox(height: 24),
-            TextField(
-              controller: _cantidadController,
-              decoration: const InputDecoration(
-                labelText: 'Cantidad',
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
+
+            // Fila Cantidad y Precio
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _cantidadController,
+                    decoration: const InputDecoration(
+                      labelText: 'Cantidad',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _precioController,
+                    decoration: const InputDecoration(
+                      labelText: 'Precio (€)',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
-            TextField(
-              controller: _precioController,
-              decoration: const InputDecoration(
-                labelText: 'Precio Unitario (€)',
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-            ),
-            const SizedBox(height: 16),
+
+            // 🟢 Descuento General
             TextField(
               controller: _descuentoController,
               decoration: const InputDecoration(
-                labelText: 'Descuento (%)',
+                labelText: 'Descuento General (%)',
                 border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.percent),
               ),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
             ),
             const SizedBox(height: 16),
+
+            // 🟢 Fila de Descuentos Adicionales
+            const Text(
+              'Descuentos Adicionales (%)',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _dto1Controller,
+                    decoration: const InputDecoration(
+                      labelText: 'Dto 1',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: TextField(
+                    controller: _dto2Controller,
+                    decoration: const InputDecoration(
+                      labelText: 'Dto 2',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: TextField(
+                    controller: _dto3Controller,
+                    decoration: const InputDecoration(
+                      labelText: 'Dto 3',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
             DropdownButtonFormField<String>(
               initialValue: _tipoIvaSeleccionado,
               decoration: const InputDecoration(
@@ -139,6 +221,9 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
             final cantidad = double.tryParse(_cantidadController.text) ?? 1;
             final precio = double.tryParse(_precioController.text) ?? 0;
             final descuento = double.tryParse(_descuentoController.text) ?? 0;
+            final d1 = double.tryParse(_dto1Controller.text) ?? 0;
+            final d2 = double.tryParse(_dto2Controller.text) ?? 0;
+            final d3 = double.tryParse(_dto3Controller.text) ?? 0;
 
             Navigator.pop(
               context,
@@ -146,7 +231,10 @@ class _EditarLineaDialogState extends State<EditarLineaDialog> {
                 articulo: widget.articulo,
                 cantidad: cantidad,
                 precio: precio,
-                descuento: descuento,
+                descuento: descuento, // Guardamos el descuento general
+                dto1: d1,
+                dto2: d2,
+                dto3: d3,
                 tipoIva: _tipoIvaSeleccionado,
               ),
             );

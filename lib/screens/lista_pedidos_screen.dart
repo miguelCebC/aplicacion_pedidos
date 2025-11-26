@@ -9,368 +9,321 @@ class ListaPedidosScreen extends StatefulWidget {
   const ListaPedidosScreen({super.key});
 
   @override
-  State<ListaPedidosScreen> createState() => _ListaPedidosScreenState();
+  State<ListaPedidosScreen> createState() => ListaPedidosScreenState();
 }
 
-class _ListaPedidosScreenState extends State<ListaPedidosScreen> {
+class ListaPedidosScreenState extends State<ListaPedidosScreen> {
   List<Map<String, dynamic>> _pedidos = [];
-  bool _sincronizando = false;
+  List<Map<String, dynamic>> _pedidosFiltrados = [];
+
+  // 🟢 NUEVO: Mapa para guardar nombres de clientes (ID -> Nombre)
+  final Map<int, String> _clientesNombres = {};
+
+  final TextEditingController _searchController = TextEditingController();
   bool _isLoading = true;
+  bool _sincronizando = false;
 
   @override
   void initState() {
     super.initState();
     _cargarPedidos();
+    // Sync fondo
+    WidgetsBinding.instance.addPostFrameCallback((_) => _sincronizarFondo());
+    _searchController.addListener(_filtrarPedidos);
   }
+
+  Future<void> _sincronizarFondo() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final url = prefs.getString('velneo_url');
+      final key = prefs.getString('velneo_api_key');
+      final comercialId = prefs.getInt('comercial_id');
+      if (url == null) return;
+
+      final api = VelneoAPIService(
+        url.startsWith('http') ? url : 'https://$url',
+        key!,
+      );
+      final pedidos = await api.obtenerPedidos(comercialId);
+
+      if (pedidos.isNotEmpty) {
+        await DatabaseHelper.instance.insertarPedidosLote(pedidos.cast());
+        await DatabaseHelper.instance.insertarLineasPedidoLote(
+          (await api.obtenerTodasLineasPedido()).cast(),
+        );
+        if (mounted) _cargarPedidos();
+      }
+    } catch (e) {
+      print("Error sync pedidos: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> recargarPedidos() => _cargarPedidos();
 
   Future<void> _cargarPedidos() async {
     setState(() => _isLoading = true);
-
     try {
       final prefs = await SharedPreferences.getInstance();
       final comercialId = prefs.getInt('comercial_id');
-      String url = prefs.getString('velneo_url') ?? '';
-      final String apiKey = prefs.getString('velneo_api_key') ?? '';
-
-      if (url.isNotEmpty && apiKey.isNotEmpty) {
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-          url = 'https://$url';
-        }
-
-        // Sincronizar desde Velneo
-        final apiService = VelneoAPIService(url, apiKey);
-        final pedidosVelneo = await apiService.obtenerPedidos();
-
-        // Guardar en BD local
-        final db = DatabaseHelper.instance;
-        await db.insertarPedidosLote(
-          pedidosVelneo.cast<Map<String, dynamic>>(),
-        );
-      }
-
-      // Cargar desde BD local
       final db = DatabaseHelper.instance;
-      List<Map<String, dynamic>> pedidos = await db.obtenerPedidos();
 
-      // Filtrar por comercial si está seleccionado
+      // 1. Cargar Pedidos
+      var pedidos = await db.obtenerPedidos();
       if (comercialId != null) {
         pedidos = pedidos.where((p) => p['cmr'] == comercialId).toList();
       }
 
+      // 🟢 2. Cargar Clientes para obtener nombres
+      final clientes = await db.obtenerClientes();
+      _clientesNombres.clear();
+      for (var c in clientes) {
+        _clientesNombres[c['id']] = c['nombre'];
+      }
+
       setState(() {
         _pedidos = pedidos;
+        _pedidosFiltrados = pedidos;
         _isLoading = false;
       });
+
+      // Reaplicar filtro si hay búsqueda activa
+      if (_searchController.text.isNotEmpty) _filtrarPedidos();
     } catch (e) {
-      print('Error al cargar pedidos: $e');
       setState(() => _isLoading = false);
     }
   }
 
-  String _formatearFecha(String fecha) {
+  // 🟢 Helper para obtener nombre
+  String _obtenerNombreCliente(int? id) {
+    if (id == null) return 'Cliente desconocido';
+    return _clientesNombres[id] ?? 'Cliente no encontrado ($id)';
+  }
+
+  void _filtrarPedidos() {
+    final query = _searchController.text.toLowerCase();
+    if (query.isEmpty) {
+      setState(() => _pedidosFiltrados = _pedidos);
+      return;
+    }
+    setState(() {
+      _pedidosFiltrados = _pedidos.where((p) {
+        final n = (p['numero'] ?? '').toString().toLowerCase();
+        final o = (p['observaciones'] ?? '').toString().toLowerCase();
+        final i = p['id'].toString();
+        // 🟢 Buscar también por nombre de cliente
+        final c = _obtenerNombreCliente(p['cliente_id']).toLowerCase();
+
+        return n.contains(query) ||
+            o.contains(query) ||
+            i.contains(query) ||
+            c.contains(query);
+      }).toList();
+    });
+  }
+
+  String _fmtFecha(String f) {
     try {
-      final dt = DateTime.parse(fecha);
-      return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      final d = DateTime.parse(f);
+      return '${d.day}/${d.month}/${d.year}';
     } catch (e) {
-      return fecha;
+      return f;
     }
   }
 
-  Future<void> _sincronizarPedidosPendientes() async {
-    final pedidosPendientes = _pedidos
-        .where((p) => p['sincronizado'] == 0)
-        .toList();
-
-    if (pedidosPendientes.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No hay pedidos pendientes de sincronizar'),
-          backgroundColor: Color(0xFF032458),
-        ),
-      );
-      return;
-    }
-
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Sincronizar Pedidos'),
-        content: Text(
-          '¿Deseas sincronizar ${pedidosPendientes.length} pedido(s) pendiente(s) con Velneo?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Sincronizar'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmar != true) return;
+  Future<void> _sincronizarPendientes() async {
+    final pendientes = _pedidos.where((p) => p['sincronizado'] == 0).toList();
+    if (pendientes.isEmpty) return;
 
     setState(() => _sincronizando = true);
-
-    await Future.delayed(const Duration(milliseconds: 100));
-
-    int exitosos = 0;
-    int fallidos = 0;
-    final errores = <String>[];
-
     try {
       final prefs = await SharedPreferences.getInstance();
-      String url = prefs.getString('velneo_url') ?? '';
-      final String apiKey = prefs.getString('velneo_api_key') ?? '';
-
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://$url';
-      }
-
-      final apiService = VelneoAPIService(url, apiKey);
+      final url = prefs.getString('velneo_url');
+      final key = prefs.getString('velneo_api_key');
+      if (url == null) return;
+      final api = VelneoAPIService(
+        url.startsWith('http') ? url : 'https://$url',
+        key!,
+      );
       final db = DatabaseHelper.instance;
 
-      for (var pedido in pedidosPendientes) {
-        try {
-          print('Sincronizando pedido #${pedido['id']}...');
+      for (var p in pendientes) {
+        final lineas = await db.obtenerLineasPedido(p['id']);
 
-          final lineas = await db.obtenerLineasPedido(pedido['id']);
+        // Preparar datos (incluyendo dirección si existe en local)
+        final pedidoMap = {
+          'cliente_id': p['cliente_id'],
+          'fecha': p['fecha'],
+          'observaciones': p['observaciones'],
+          'total': p['total'],
+          'cmr': p['cmr'],
+          'serie_id': p['serie_id'],
+          'direccion_entrega_id':
+              p['direccion_entrega_id'], // 🟢 Enviar dirección
+          'lineas': lineas
+              .map(
+                (l) => {
+                  'articulo_id': l['articulo_id'],
+                  'cantidad': l['cantidad'],
+                  'precio': l['precio'],
+                  'dto1': l['dto1'],
+                  'dto2': l['dto2'],
+                  'dto3': l['dto3'],
+                  'tipo_iva': l['tipo_iva'],
+                },
+              )
+              .toList(),
+        };
 
-          if (lineas.isEmpty) {
-            throw Exception('El pedido no tiene líneas');
-          }
-
-          final pedidoData = {
-            'cliente_id': pedido['cliente_id'],
-            'fecha': pedido['fecha'],
-            'observaciones': pedido['observaciones'] ?? '',
-            'total': pedido['total'],
-            'lineas': lineas
-                .map(
-                  (linea) => {
-                    'articulo_id': linea['articulo_id'],
-                    'cantidad': linea['cantidad'],
-                    'precio': linea['precio'],
-                  },
-                )
-                .toList(),
-          };
-
-          final resultado = await apiService
-              .crearPedido(pedidoData)
-              .timeout(const Duration(seconds: 45));
-
-          print('✓ Pedido #${pedido['id']} sincronizado: $resultado');
-
-          await db.actualizarPedidoSincronizado(pedido['id'], 1);
-
-          exitosos++;
-
-          await Future.delayed(const Duration(milliseconds: 500));
-        } catch (e) {
-          print('✗ Error al sincronizar pedido ${pedido['id']}: $e');
-          fallidos++;
-          final errorMsg = e.toString().replaceAll('Exception: ', '');
-          errores.add('Pedido #${pedido['id']}: $errorMsg');
-        }
+        await api.crearPedido(pedidoMap);
+        await db.actualizarPedidoSincronizado(p['id'], 1);
       }
-
-      setState(() => _sincronizando = false);
       await _cargarPedidos();
-
-      if (!mounted) return;
-
-      if (fallidos == 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '✓ $exitosos pedido(s) sincronizado(s) correctamente',
-            ),
-            backgroundColor: const Color(0xFF032458),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      } else {
-        showDialog(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Resultado de Sincronización'),
-            content: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('✓ Exitosos: $exitosos'),
-                  Text('✗ Fallidos: $fallidos'),
-                  if (errores.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Errores:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    ...errores.map(
-                      (e) => Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(e, style: const TextStyle(fontSize: 12)),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cerrar'),
-              ),
-            ],
-          ),
-        );
-      }
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Sincronización exitosa')));
     } catch (e) {
-      setState(() => _sincronizando = false);
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: const Color(0xFFF44336),
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+    } finally {
+      if (mounted) setState(() => _sincronizando = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final pedidosPendientes = _pedidos
-        .where((p) => p['sincronizado'] == 0)
-        .length;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Lista de Pedidos'),
-            if (pedidosPendientes > 0)
-              Text(
-                '$pedidosPendientes pendiente(s)',
-                style: const TextStyle(fontSize: 12),
+    final int count = _pedidos.where((p) => p['sincronizado'] == 0).length;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Buscar pedido...', // 🟢 Texto actualizado
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    fillColor: Colors.grey[100],
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  ),
+                ),
               ),
-          ],
-        ),
-        actions: [
-          if (pedidosPendientes > 0)
-            IconButton(
-              icon: _sincronizando
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Icon(Icons.cloud_upload),
-              onPressed: _sincronizando ? null : _sincronizarPedidosPendientes,
-              tooltip: 'Sincronizar pedidos pendientes',
-            ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _cargarPedidos,
-            tooltip: 'Recargar lista',
+              if (count > 0) ...[
+                const SizedBox(width: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF032458),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: _sincronizando
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.cloud_upload, color: Colors.white),
+                    onPressed: _sincronizando ? null : _sincronizarPendientes,
+                  ),
+                ),
+              ],
+            ],
           ),
-        ],
-      ), // 🟢 2. AÑADE ESTE BLOQUE (EL BOTÓN FLOTANTE)
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          // Navegar a la pantalla de crear pedido
-          final resultado = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const CrearPedidoScreen()),
-          );
-          // Si se creó un pedido (devuelve true), recargar la lista
-          if (resultado == true) {
-            _cargarPedidos();
-          }
-        },
-        backgroundColor: const Color(0xFF032458),
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _pedidos.isEmpty
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.shopping_cart_outlined,
-                    size: 64,
-                    color: Colors.grey,
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    'No hay pedidos',
-                    style: TextStyle(fontSize: 18, color: Colors.grey),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(8),
-              itemCount: _pedidos.length,
-              itemBuilder: (context, index) {
-                final pedido = _pedidos[index];
-                final esSincronizado = pedido['sincronizado'] == 1;
-                final numeroPedido = pedido['numero']?.toString() ?? '';
-                final tituloPedido = numeroPedido.isNotEmpty
-                    ? 'Pedido $numeroPedido'
-                    : 'Pedido #${pedido['id']}';
-                return Card(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: esSincronizado
-                          ? const Color(0xFF032458)
-                          : const Color(0xFFF44336),
-                      child: Icon(
-                        esSincronizado ? Icons.cloud_done : Icons.cloud_off,
-                        color: Colors.white,
-                      ),
-                    ),
-                    title: Text(tituloPedido),
-                    subtitle: Text(
-                      '${_formatearFecha(pedido['fecha'])}\n${pedido['observaciones'] ?? 'Sin observaciones'}',
-                    ),
-                    trailing: Text(
-                      '${pedido['total'].toStringAsFixed(2)} €',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              DetallePedidoScreen(pedido: pedido),
+        ),
+        Expanded(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _cargarPedidos,
+                  child: ListView.builder(
+                    itemCount: _pedidosFiltrados.length,
+                    itemBuilder: (ctx, i) {
+                      final p = _pedidosFiltrados[i];
+                      final sync = p['sincronizado'] == 1;
+
+                      // 🟢 Obtener nombre cliente
+                      final nombreCliente = _obtenerNombreCliente(
+                        p['cliente_id'],
+                      );
+
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: ListTile(
+                          title: Text(
+                            p['numero']?.toString().isNotEmpty == true
+                                ? '${p['numero']}'
+                                : 'Pedido #${p['id']}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          // 🟢 SUBTÍTULO MEJORADO CON NOMBRE CLIENTE
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                nombreCliente,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              Text('${_fmtFecha(p['fecha'])}'),
+                              if (p['observaciones'] != null &&
+                                  p['observaciones'].toString().isNotEmpty)
+                                Text(
+                                  p['observaciones'],
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          trailing: Text(
+                            '${p['total']?.toStringAsFixed(2) ?? "0.00"}€',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DetallePedidoScreen(pedido: p),
+                            ),
+                          ).then((_) => _cargarPedidos()),
                         ),
                       );
                     },
                   ),
-                );
-              },
-            ),
+                ),
+        ),
+      ],
     );
   }
 }

@@ -1,4 +1,7 @@
+import 'dart:convert'; // Para base64
+import 'dart:io'; // Para File
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart'; // 🟢 IMPORTAR IMAGE PICKER
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database_helper.dart';
 import '../services/api_service.dart';
@@ -19,9 +22,18 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
   final _observacionesController = TextEditingController();
   final List<LineaPedidoData> _lineas = [];
 
-  // Variables para Series
+  // Listas para desplegables
   List<Map<String, dynamic>> _series = [];
+  List<Map<String, dynamic>> _formasPago = [];
+  List<Map<String, dynamic>> _direccionesCliente = [];
+  int? _direccionEntregaId;
+  // Selecciones
   int? _serieSeleccionadaId;
+  int? _formaPagoSeleccionadaId;
+  DateTime? _fechaEntrega;
+
+  // 🟢 VARIABLE PARA LA FOTO (Temporal en memoria)
+  String? _fotoBase64;
 
   bool _isLoading = false;
   bool _guardando = false;
@@ -29,129 +41,67 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
   @override
   void initState() {
     super.initState();
-    _cargarSeries();
+    _cargarMaestros();
   }
 
-  @override
-  void dispose() {
-    _observacionesController.dispose();
-    super.dispose();
-  }
+  Future<void> _cargarMaestros() async {
+    final db = DatabaseHelper.instance;
+    final series = await db.obtenerSeries(tipo: 'V');
+    final formasPago = await db.obtenerFormasPago();
 
-  Future<void> _cargarSeries() async {
-    try {
-      final series = await DatabaseHelper.instance.obtenerSeries(tipo: 'V');
-      if (mounted) {
-        setState(() {
-          _series = series;
-          if (_series.isNotEmpty) {
-            _serieSeleccionadaId = _series[0]['id'];
-          }
-        });
-      }
-    } catch (e) {
-      print('Error cargando series: $e');
-    }
-  }
-
-  Future<void> _seleccionarCliente() async {
-    final cliente = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (dialogContext) => const BuscarClienteDialog(),
-    );
-    if (cliente != null) {
-      setState(() => _clienteSeleccionado = cliente);
-    }
-  }
-
-  Future<void> _agregarLinea() async {
-    if (_clienteSeleccionado == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Primero selecciona un cliente')),
-      );
-      return;
-    }
-
-    final articulo = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (dialogContext) => const BuscarArticuloDialog(),
-    );
-
-    if (articulo != null) {
-      final db = DatabaseHelper.instance;
-      final precioInfo = await db.obtenerPrecioYDescuento(
-        _clienteSeleccionado!['id'],
-        articulo['id'],
-        articulo['precio'] ?? 0.0,
-      );
-
-      if (!mounted) return;
-
-      final lineaConPrecio = await showDialog<LineaPedidoData>(
-        context: context,
-        builder: (dialogContext) => EditarLineaDialog(
-          articulo: articulo,
-          cantidad: 1,
-          precio: precioInfo['precio']!,
-          descuento: precioInfo['descuento']!,
-          tipoIva: 'G',
-        ),
-      );
-
-      if (lineaConPrecio != null) {
-        setState(() {
-          _lineas.add(lineaConPrecio);
-        });
-      }
-    }
-  }
-
-  void _eliminarLinea(int index) {
-    setState(() {
-      _lineas.removeAt(index);
-    });
-  }
-
-  Future<void> _editarLinea(int index) async {
-    final lineaActual = _lineas[index];
-    final lineaEditada = await showDialog<LineaPedidoData>(
-      context: context,
-      builder: (dialogContext) => EditarLineaDialog(
-        articulo: lineaActual.articulo,
-        cantidad: lineaActual.cantidad,
-        precio: lineaActual.precio,
-        descuento: lineaActual.descuento,
-        tipoIva: lineaActual.tipoIva,
-      ),
-    );
-
-    if (lineaEditada != null) {
+    if (mounted) {
       setState(() {
-        _lineas[index] = lineaEditada;
+        _series = series;
+        _formasPago = formasPago;
+        if (_series.isNotEmpty) _serieSeleccionadaId = _series[0]['id'];
       });
     }
   }
 
-  double _calcularBaseImponible() {
-    return _lineas.fold(0, (total, linea) {
-      final subtotal = linea.cantidad * linea.precio;
-      final descuento = subtotal * (linea.descuento / 100);
-      return total + (subtotal - descuento);
-    });
+  Future<void> _seleccionarFechaEntrega() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2100),
+      locale: const Locale('es', 'ES'),
+    );
+    if (picked != null) {
+      setState(() => _fechaEntrega = picked);
+    }
   }
 
-  double _calcularTotalIva() {
-    return _lineas.fold(0, (totalIva, linea) {
-      final subtotal = linea.cantidad * linea.precio;
-      final descuento = subtotal * (linea.descuento / 100);
-      final baseLinea = subtotal - descuento;
-      final ivaLinea = baseLinea * (linea.porcentajeIva / 100);
-      return totalIva + ivaLinea;
-    });
+  // 🟢 1. MÉTODOS PARA TOMAR FOTO
+  Future<void> _tomarFoto(ImageSource source) async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: source,
+        maxWidth: 800, // Reducir tamaño para optimizar subida
+        maxHeight: 800,
+        imageQuality: 70,
+      );
+
+      if (image == null) return;
+
+      final bytes = await File(image.path).readAsBytes();
+      final String base64String = base64Encode(bytes);
+
+      setState(() {
+        _fotoBase64 = base64String;
+      });
+    } catch (e) {
+      print('Error cámara: $e');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
   }
 
-  double _calcularTotal() {
-    return _calcularBaseImponible() + _calcularTotalIva();
+  void _borrarFoto() {
+    setState(() {
+      _fotoBase64 = null;
+    });
   }
 
   Future<void> _guardarPedido() async {
@@ -163,14 +113,6 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
       ).showSnackBar(const SnackBar(content: Text('Selecciona un cliente')));
       return;
     }
-
-    if (_serieSeleccionadaId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona una serie de facturación')),
-      );
-      return;
-    }
-
     if (_lineas.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Agrega al menos un artículo')),
@@ -189,54 +131,63 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
       final String apiKey = prefs.getString('velneo_api_key') ?? '';
       final comercialId = prefs.getInt('comercial_id');
 
-      if (url.isEmpty || apiKey.isEmpty) {
-        throw Exception('Configura la URL y API Key en Configuración');
-      }
-
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://$url';
-      }
+      if (url.isEmpty || apiKey.isEmpty)
+        throw Exception('Configura la API primero');
+      if (!url.startsWith('http')) url = 'https://$url';
 
       final apiService = VelneoAPIService(url, apiKey);
 
-      final pedidoVelneoData = {
+      // 🟢 1. Estructura del pedido completa
+      final pedidoData = {
         'cliente_id': _clienteSeleccionado!['id'],
         'cmr': comercialId,
         'serie_id': _serieSeleccionadaId,
         'fecha': DateTime.now().toIso8601String(),
+        'fecha_entrega': _fechaEntrega?.toIso8601String(),
+        'forma_pago': _formaPagoSeleccionadaId,
+        'direccion_entrega_id': _direccionEntregaId,
         'observaciones': _observacionesController.text,
         'total': _calcularTotal(),
+        // Mapeo de líneas con los nuevos campos
         'lineas': _lineas
             .map(
               (linea) => {
                 'articulo_id': linea.articulo['id'],
                 'cantidad': linea.cantidad,
                 'precio': linea.precio,
-                'por_dto': linea.descuento,
-                'reg_iva_vt_imp_pla': linea.tipoIva,
+                'tipo_iva': linea.tipoIva,
+
+                // Campos nuevos que pedías:
+                'dto1': linea.dto1,
+                'dto2': linea.dto2,
+                'dto3': linea.dto3,
+
+                'por_dto': linea.descuento, // Descuento general
               },
             )
             .toList(),
       };
 
-      final resultado = await apiService
-          .crearPedido(pedidoVelneoData)
-          .timeout(
-            const Duration(seconds: 45),
-            onTimeout: () => throw Exception(
-              'Timeout: El servidor tardó demasiado en responder',
-            ),
-          );
+      // 🟢 2. Llamada a la API (Usará los métodos corregidos arriba)
+      final resultado = await apiService.crearPedido(pedidoData);
+      final pedidoId = resultado['id'];
 
-      final pedidoIdVelneo = resultado['id'];
+      // 🟢 3. Subir Foto si existe
+      if (_fotoBase64 != null) {
+        await apiService.actualizarFotoPedido(pedidoId, _fotoBase64);
+      }
 
+      // 4. Guardar en BD Local
       final db = DatabaseHelper.instance;
       await db.insertarPedido({
-        'id': pedidoIdVelneo,
+        'id': pedidoId,
         'cliente_id': _clienteSeleccionado!['id'],
         'cmr': comercialId,
         'serie_id': _serieSeleccionadaId,
         'fecha': DateTime.now().toIso8601String(),
+        'fecha_entrega': _fechaEntrega?.toIso8601String(),
+        'forma_pago': _formaPagoSeleccionadaId,
+        'direccion_entrega_id': _direccionEntregaId,
         'observaciones': _observacionesController.text,
         'total': _calcularTotal(),
         'estado': 'Sincronizado',
@@ -245,45 +196,39 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
 
       for (var linea in _lineas) {
         await db.insertarLineaPedido({
-          'pedido_id': pedidoIdVelneo,
+          'pedido_id': pedidoId,
           'articulo_id': linea.articulo['id'],
           'cantidad': linea.cantidad,
           'precio': linea.precio,
-          'por_descuento': linea.descuento,
-          'por_iva': linea.porcentajeIva,
           'tipo_iva': linea.tipoIva,
+          'por_descuento': linea.descuento,
+          'dto1': linea.dto1,
+          'dto2': linea.dto2,
+          'dto3': linea.dto3,
         });
       }
 
-      setState(() {
-        _isLoading = false;
-        _guardando = false;
-      });
-
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ Pedido #$pedidoIdVelneo creado correctamente'),
+          content: Text('✅ Pedido #$pedidoId creado correctamente'),
           backgroundColor: const Color(0xFF032458),
-          duration: const Duration(seconds: 2),
         ),
       );
-
       Navigator.pop(context, true);
     } catch (e) {
       setState(() {
         _isLoading = false;
         _guardando = false;
       });
-
       if (!mounted) return;
-
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Error'),
-          content: Text(e.toString().replaceAll('Exception: ', '')),
+        builder: (_) => AlertDialog(
+          title: const Text('Error al crear'),
+          content: SingleChildScrollView(
+            child: Text(e.toString().replaceAll('Exception: ', '')),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -293,6 +238,67 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _seleccionarCliente() async {
+    final cliente = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => const BuscarClienteDialog(),
+    );
+
+    if (cliente != null) {
+      setState(() {
+        _clienteSeleccionado = cliente;
+        _direccionEntregaId = null; // Reseteamos dirección anterior
+        _direccionesCliente = [];
+      });
+
+      // Cargar direcciones del cliente
+      final db = DatabaseHelper.instance;
+      final direcciones = await db.obtenerDirecciones(ent: cliente['id']);
+
+      setState(() {
+        _direccionesCliente = direcciones;
+        // Asignar automáticamente la primera dirección encontrada como default
+        if (_direccionesCliente.isNotEmpty) {
+          _direccionEntregaId = _direccionesCliente.first['id'];
+        }
+      });
+    }
+  }
+
+  Future<void> _agregarLinea() async {
+    if (_clienteSeleccionado == null) return;
+    final articulo = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => const BuscarArticuloDialog(),
+    );
+    if (articulo != null) {
+      final db = DatabaseHelper.instance;
+      final precioInfo = await db.obtenerPrecioYDescuento(
+        _clienteSeleccionado!['id'],
+        articulo['id'],
+        articulo['precio'] ?? 0.0,
+      );
+      if (!mounted) return;
+      final linea = await showDialog<LineaPedidoData>(
+        context: context,
+        builder: (_) => EditarLineaDialog(
+          articulo: articulo,
+          cantidad: 1,
+          precio: precioInfo['precio']!,
+          descuento: precioInfo['descuento']!,
+        ),
+      );
+      if (linea != null) setState(() => _lineas.add(linea));
+    }
+  }
+
+  double _calcularTotal() {
+    return _lineas.fold(0, (sum, l) {
+      final base = l.cantidad * l.precio * (1 - (l.descuento / 100));
+      return sum + (base * (1 + (l.porcentajeIva / 100)));
+    });
   }
 
   @override
@@ -305,9 +311,9 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16.0),
+              padding: const EdgeInsets.all(16),
               children: [
-                // Cliente
+                // CLIENTE
                 Card(
                   child: ListTile(
                     title: Text(
@@ -322,15 +328,13 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                     subtitle: _clienteSeleccionado != null
                         ? Text('ID: ${_clienteSeleccionado!['id']}')
                         : null,
-                    leading: const Icon(Icons.business),
                     trailing: const Icon(Icons.search),
                     onTap: _seleccionarCliente,
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // 🟢 DROPDOWN DE SERIES CORREGIDO (Evita overflow)
-                if (_series.isNotEmpty)
+                if (_clienteSeleccionado != null &&
+                    _direccionesCliente.isNotEmpty)
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -338,35 +342,119 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                         vertical: 4,
                       ),
                       child: DropdownButtonFormField<int>(
-                        isExpanded: true, // 🟢 ESTA LÍNEA CORRIGE EL OVERFLOW
+                        isExpanded: true,
                         decoration: const InputDecoration(
-                          labelText: 'Serie de Facturación',
+                          labelText: 'Dirección de Entrega',
                           border: InputBorder.none,
-                          icon: Icon(Icons.folder_open, color: Colors.grey),
+                          icon: Icon(Icons.location_on, color: Colors.grey),
                         ),
-                        initialValue: _serieSeleccionadaId,
-                        items: _series.map((serie) {
+                        value: _direccionEntregaId,
+                        items: _direccionesCliente.map((dir) {
                           return DropdownMenuItem<int>(
-                            value: serie['id'],
+                            value: dir['id'],
                             child: Text(
-                              serie['nombre'],
-                              overflow: TextOverflow
-                                  .ellipsis, // 🟢 CORTAR TEXTO LARGO
-                              maxLines: 1,
+                              dir['direccion'],
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 2,
+                              style: const TextStyle(fontSize: 13),
                             ),
                           );
                         }).toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _serieSeleccionadaId = value;
-                          });
-                        },
+                        onChanged: (v) =>
+                            setState(() => _direccionEntregaId = v),
                       ),
                     ),
                   ),
-                if (_series.isNotEmpty) const SizedBox(height: 16),
 
-                // Observaciones
+                if (_clienteSeleccionado != null && _direccionesCliente.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text(
+                      'Este cliente no tiene direcciones.',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ),
+                // FECHA Y SERIE
+                const SizedBox(height: 16),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: _seleccionarFechaEntrega,
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Entrega (Opcional)',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.calendar_today, size: 20),
+                          ),
+                          child: Text(
+                            _fechaEntrega != null
+                                ? '${_fechaEntrega!.day}/${_fechaEntrega!.month}/${_fechaEntrega!.year}'
+                                : 'Sin fecha',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Serie',
+                          border: OutlineInputBorder(),
+                        ),
+                        value: _serieSeleccionadaId,
+                        items: _series
+                            .map(
+                              (s) => DropdownMenuItem<int>(
+                                value: s['id'],
+                                child: Text(
+                                  s['nombre'],
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) =>
+                            setState(() => _serieSeleccionadaId = v),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // FORMA DE PAGO
+                DropdownButtonFormField<int>(
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Forma de Pago',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.payment),
+                  ),
+                  value: _formaPagoSeleccionadaId,
+                  items: [
+                    const DropdownMenuItem<int>(
+                      value: null,
+                      child: Text('Sin especificar'),
+                    ),
+                    ..._formasPago.map(
+                      (f) => DropdownMenuItem<int>(
+                        value: f['id'],
+                        child: Text(
+                          f['nombre'],
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _formaPagoSeleccionadaId = v),
+                ),
+                const SizedBox(height: 16),
+
+                // OBSERVACIONES
                 TextField(
                   controller: _observacionesController,
                   decoration: const InputDecoration(
@@ -374,11 +462,90 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.note),
                   ),
-                  maxLines: 3,
+                  maxLines: 2,
                 ),
                 const SizedBox(height: 24),
 
-                // Título y botón agregar artículo
+                // 🟢 SECCIÓN FOTOGRAFÍA
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.camera_alt, color: Color(0xFF032458)),
+                            SizedBox(width: 8),
+                            Text(
+                              'Adjuntar Fotografía',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        if (_fotoBase64 != null)
+                          Stack(
+                            alignment: Alignment.topRight,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.memory(
+                                  base64Decode(_fotoBase64!),
+                                  height: 200,
+                                  width: double.infinity,
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.cancel,
+                                  color: Colors.red,
+                                  size: 30,
+                                ),
+                                onPressed: _borrarFoto,
+                              ),
+                            ],
+                          )
+                        else
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              ElevatedButton.icon(
+                                onPressed: () =>
+                                    _tomarFoto(ImageSource.gallery),
+                                icon: const Icon(Icons.photo_library),
+                                label: const Text('Galería'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.grey[200],
+                                  foregroundColor: Colors.black,
+                                ),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () => _tomarFoto(ImageSource.camera),
+                                icon: const Icon(Icons.camera_alt),
+                                label: const Text('Cámara'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.grey[200],
+                                  foregroundColor: Colors.black,
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // BOTÓN AGREGAR ARTÍCULO
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -400,211 +567,57 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
 
-                // Lista de artículos
+                // LISTA ARTÍCULOS
                 if (_lineas.isEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(32),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[300]!),
-                    ),
+                  const Padding(
+                    padding: EdgeInsets.all(16.0),
                     child: Center(
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.shopping_cart_outlined,
-                            size: 48,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'No hay artículos',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        'No hay artículos',
+                        style: TextStyle(color: Colors.grey),
                       ),
                     ),
                   )
                 else
                   ..._lineas.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final linea = entry.value;
-                    final subtotal = linea.cantidad * linea.precio;
-                    final descuento = subtotal * (linea.descuento / 100);
-                    final baseLinea = subtotal - descuento;
-                    final ivaLinea = baseLinea * (linea.porcentajeIva / 100);
-                    final totalLinea = baseLinea + ivaLinea;
-
+                    final l = entry.value;
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       child: ListTile(
-                        leading: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF032458).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(
-                            Icons.inventory_2,
-                            color: Color(0xFF032458),
-                          ),
-                        ),
-                        title: Text(
-                          linea.articulo['nombre'],
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                        title: Text(l.articulo['nombre']),
                         subtitle: Text(
-                          '${linea.articulo['codigo']} - ${linea.cantidad} x ${linea.precio.toStringAsFixed(2)}€'
-                          '${linea.descuento > 0 ? ' (-${linea.descuento}%)' : ''}'
-                          '\nIVA: ${linea.tipoIva} (${linea.porcentajeIva}%)',
+                          '${l.cantidad} x ${l.precio}€ (${l.descuento}% dto)',
                         ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  '${totalLinea.toStringAsFixed(2)}€',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF032458),
-                                  ),
-                                ),
-                                if (linea.descuento > 0 ||
-                                    linea.porcentajeIva > 0)
-                                  Text(
-                                    'Base: ${baseLinea.toStringAsFixed(2)}€',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(width: 8),
-                            PopupMenuButton(
-                              icon: const Icon(Icons.more_vert),
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                  value: 'editar',
-                                  child: Text('Editar'),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'eliminar',
-                                  child: Text('Eliminar'),
-                                ),
-                              ],
-                              onSelected: (value) {
-                                if (value == 'editar') {
-                                  _editarLinea(index);
-                                } else if (value == 'eliminar') {
-                                  _eliminarLinea(index);
-                                }
-                              },
-                            ),
-                          ],
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () =>
+                              setState(() => _lineas.removeAt(entry.key)),
                         ),
-                        isThreeLine: true,
                       ),
                     );
                   }),
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
 
-                // Card de totales
-                Card(
-                  margin: const EdgeInsets.symmetric(vertical: 16),
-                  color: const Color(0xFF032458).withOpacity(0.05),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Base Imponible:'),
-                            Text(
-                              '${_calcularBaseImponible().toStringAsFixed(2)}€',
-                              style: const TextStyle(fontSize: 16),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('IVA:'),
-                            Text(
-                              '${_calcularTotalIva().toStringAsFixed(2)}€',
-                              style: const TextStyle(fontSize: 16),
-                            ),
-                          ],
-                        ),
-                        const Divider(height: 24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'TOTAL:',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              '${_calcularTotal().toStringAsFixed(2)}€',
-                              style: const TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF032458),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                // BOTÓN GUARDAR
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: _guardando ? null : _guardarPedido,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF032458),
+                      foregroundColor: Colors.white,
                     ),
-                  ),
-                ),
-
-                // Botón guardar
-                ElevatedButton(
-                  onPressed: _guardando ? null : _guardarPedido,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF032458),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: _guardando
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Colors.white,
-                            ),
+                    child: _guardando
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text(
+                            'GUARDAR PEDIDO',
+                            style: TextStyle(fontSize: 16),
                           ),
-                        )
-                      : const Text(
-                          'GUARDAR PEDIDO',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                  ),
                 ),
               ],
             ),

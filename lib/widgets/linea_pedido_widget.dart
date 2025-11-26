@@ -17,6 +17,22 @@ class LineaPedidoWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Cálculo visual del total de línea
+    final precioNeto = linea.precioNeto;
+    final totalLinea =
+        precioNeto * linea.cantidad * (1 + (linea.porcentajeIva / 100));
+
+    // Construir string de descuentos
+    List<String> descuentos = [];
+    if (linea.descuento > 0) descuentos.add('${linea.descuento}%');
+    if (linea.dto1 > 0) descuentos.add('D1:${linea.dto1}%');
+    if (linea.dto2 > 0) descuentos.add('D2:${linea.dto2}%');
+    if (linea.dto3 > 0) descuentos.add('D3:${linea.dto3}%');
+
+    String txtDescuentos = descuentos.isNotEmpty
+        ? 'Dto: ${descuentos.join(" + ")}'
+        : '';
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
@@ -37,7 +53,9 @@ class LineaPedidoWidget extends StatelessWidget {
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          '${linea.articulo['codigo']} - ${linea.precio}€ x ${linea.cantidad}',
+                          '${linea.articulo['codigo']} - ${linea.precio}€ x ${linea.cantidad}'
+                          '${txtDescuentos.isNotEmpty ? '\n$txtDescuentos' : ''}'
+                          '\nIVA: ${linea.tipoIva} (${linea.porcentajeIva}%)',
                           style: TextStyle(
                             color: Colors.grey[600],
                             fontSize: 12,
@@ -62,7 +80,7 @@ class LineaPedidoWidget extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Text(
-                    'Subtotal: ${(linea.cantidad * linea.precio).toStringAsFixed(2)}€',
+                    'Total: ${totalLinea.toStringAsFixed(2)}€',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,

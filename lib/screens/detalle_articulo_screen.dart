@@ -143,27 +143,37 @@ class _DetalleArticuloScreenState extends State<DetalleArticuloScreen>
   Future<void> _cargarDatosExtendidos() async {
     final db = DatabaseHelper.instance;
 
-    // Proveedor
-    if (widget.articulo['proveedor_id'] != null &&
-        widget.articulo['proveedor_id'] != 0) {
+    // 1. Proveedor
+    final proveedorId = widget.articulo['proveedor_id'];
+    if (proveedorId != null && proveedorId.toString() != '0') {
       final nombre = await db.obtenerNombreCliente(
-        widget.articulo['proveedor_id'],
+        int.tryParse(proveedorId.toString()) ?? 0,
       );
       if (mounted) setState(() => _nombreProveedor = nombre);
     } else {
       if (mounted) setState(() => _nombreProveedor = 'No asignado');
     }
 
-    // 🟢 FAMILIA: Nos aseguramos de convertirlo a String de forma segura
-    final familiaId = widget.articulo['familia'];
-    if (familiaId != null &&
-        familiaId.toString().isNotEmpty &&
-        familiaId.toString() != '0') {
-      // Pasamos el ID tal cual, el helper decidirá cómo buscarlo
-      final nombreFam = await db.obtenerNombreFamilia(familiaId.toString());
+    // 2. Familia
+    final familiaData = widget.articulo['familia'];
+    // DEBUG: Ver qué valor llega realmente a la pantalla
+    print('🔎 DEBUG DETALLE: Dato familia recibido = "$familiaData"');
+
+    if (familiaData != null &&
+        familiaData.toString() != '0' &&
+        familiaData.toString().isNotEmpty) {
+      String idLimpio = familiaData.toString();
+
+      // Si viene como "3.0", lo limpiamos a "3"
+      if (idLimpio.endsWith('.0')) idLimpio = idLimpio.split('.')[0];
+
+      // Si viene como objeto (raro, pero posible), intentamos sacar ID
+      if (idLimpio.startsWith('{')) idLimpio = 'Error formato';
+
+      final nombreFam = await db.obtenerNombreFamilia(idLimpio);
       if (mounted) setState(() => _nombreFamilia = nombreFam);
     } else {
-      if (mounted) setState(() => _nombreFamilia = 'Sin familia');
+      if (mounted) setState(() => _nombreFamilia = 'Sin familia asignada');
     }
   }
 
@@ -245,14 +255,14 @@ class _DetalleArticuloScreenState extends State<DetalleArticuloScreen>
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text(
-                        'PRECIO BASE:',
+                        'PRECIO',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),
                       ),
                       Text(
-                        '${widget.articulo['precio']}€',
+                        '${(widget.articulo['precio'] as num).toStringAsFixed(2)}€',
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 20,

@@ -393,40 +393,6 @@ class _CrearClienteScreenState extends State<CrearClienteScreen>
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Divider(),
-                    const Text(
-                      'Ficha Principal',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF032458),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _telefonoController,
-                      decoration: const InputDecoration(
-                        labelText: 'Teléfono Principal',
-                        prefixIcon: Icon(Icons.phone),
-                      ),
-                      keyboardType: TextInputType.phone,
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _emailController,
-                      decoration: const InputDecoration(
-                        labelText: 'Email Principal',
-                        prefixIcon: Icon(Icons.email),
-                      ),
-                      keyboardType: TextInputType.emailAddress,
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _direccionController,
-                      decoration: const InputDecoration(
-                        labelText: 'Dirección Principal',
-                        prefixIcon: Icon(Icons.place),
-                      ),
-                    ),
                   ],
                 ),
 
@@ -435,7 +401,7 @@ class _CrearClienteScreenState extends State<CrearClienteScreen>
                   floatingActionButton: FloatingActionButton(
                     onPressed: _dialogAddTelefono,
                     backgroundColor: const Color(0xFF032458),
-                    child: const Icon(Icons.add_call, color: Colors.white),
+                    child: const Icon(Icons.add, color: Colors.white),
                   ),
                   body: _listaTelefonos.isEmpty
                       ? const Center(child: Text('Sin teléfonos adicionales'))
@@ -459,10 +425,7 @@ class _CrearClienteScreenState extends State<CrearClienteScreen>
                   floatingActionButton: FloatingActionButton(
                     onPressed: _dialogAddEmail,
                     backgroundColor: const Color(0xFF032458),
-                    child: const Icon(
-                      Icons.alternate_email,
-                      color: Colors.white,
-                    ),
+                    child: const Icon(Icons.add, color: Colors.white),
                   ),
                   body: _listaEmails.isEmpty
                       ? const Center(child: Text('Sin emails adicionales'))
@@ -486,10 +449,7 @@ class _CrearClienteScreenState extends State<CrearClienteScreen>
                   floatingActionButton: FloatingActionButton(
                     onPressed: _dialogAddDireccion,
                     backgroundColor: const Color(0xFF032458),
-                    child: const Icon(
-                      Icons.add_location_alt,
-                      color: Colors.white,
-                    ),
+                    child: const Icon(Icons.add, color: Colors.white),
                   ),
                   body: _listaDirecciones.isEmpty
                       ? const Center(child: Text('Sin direcciones adicionales'))

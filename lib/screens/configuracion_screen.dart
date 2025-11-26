@@ -172,7 +172,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       _logMessages.clear();
     });
 
-    _addLog('🚀 Iniciando sincronización');
+    // _addLog('🚀 Iniciando sincronización');
 
     try {
       String url = _urlController.text.trim();
@@ -195,7 +195,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
 
       final conexionOk = await apiService.probarConexion();
       if (!conexionOk) throw Exception('No se puede conectar a la API');
-      _addLog('✅ Conexión exitosa');
+      //  _addLog('✅ Conexión exitosa');
 
       // --- 2. Artículos ---
       setState(() {
@@ -203,7 +203,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _syncProgress = 0.10;
         _syncDetalle = 'Descargando catálogo de productos...';
       });
-      _addLog('📦 Descargando artículos');
+      //  _addLog('📦 Descargando artículos');
       final articulosLista = await apiService.obtenerArticulos();
 
       await db.limpiarArticulos();
@@ -225,25 +225,25 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
               'Guardando artículos ${i + 1}-$end de ${articulosLista.length}...';
         });
       }
-      _addLog('✅ ${articulosLista.length} artículos guardados');
+      //  _addLog('✅ ${articulosLista.length} artículos guardados');
       // 🟢 --- 2.1 Familias (NUEVO BLOQUE) ---
       setState(() {
         _syncStatus = 'Familias...';
         _syncProgress = 0.25;
         _syncDetalle = 'Descargando familias de artículos...';
       });
-      _addLog('📥 Descargando familias...');
+      //  _addLog('📥 Descargando familias...');
       final familiasLista = await apiService.obtenerFamilias();
       await db.limpiarFamilias();
       await db.insertarFamiliasLote(familiasLista.cast<Map<String, dynamic>>());
-      _addLog('✅ ${familiasLista.length} familias guardadas');
+      //  _addLog('✅ ${familiasLista.length} familias guardadas');
       // --- 3. Clientes y Comerciales ---
       setState(() {
         _syncStatus = 'Clientes...';
         _syncProgress = 0.30;
         _syncDetalle = 'Descargando clientes y comerciales...';
       });
-      _addLog('📥 Descargando clientes y comerciales...');
+      //_addLog('📥 Descargando clientes y comerciales...');
       final resultadoClientes = await apiService.obtenerClientes();
       final clientesLista = resultadoClientes['clientes'] as List;
       final comercialesLista = resultadoClientes['comerciales'] as List;
@@ -263,19 +263,15 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         comercialesLista.cast<Map<String, dynamic>>(),
       );
       // Ejemplo en tu lógica de Sincronización:
-      _addLog('📥 Descargando contactos...');
+      //_addLog('📥 Descargando contactos...');
       final contactos = await apiService.obtenerContactos();
       await db.insertarContactosLote(
         contactos,
       ); // Esto guardará y actualizará los principales en clientes
-      _addLog('✅ Contactos actualizados');
+      //_addLog('✅ Contactos actualizados');
       // Actualizar lista en memoria
       final comercialesDb = await db.obtenerComerciales();
       setState(() => _comerciales = comercialesDb);
-
-      _addLog(
-        '✅ ${clientesLista.length} clientes y ${comercialesLista.length} comerciales',
-      );
 
       // --- 4. Series ---
       setState(() {
@@ -284,25 +280,26 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _syncDetalle = 'Descargando series de facturación...';
       });
 
-      _addLog('📥 Descargando series...');
       final seriesLista = await apiService.obtenerSeries();
       await db.limpiarSeries();
       await db.insertarSeriesLote(seriesLista.cast<Map<String, dynamic>>());
       _addLog('✅ ${seriesLista.length} series guardadas');
-
+      setState(() {
+        _syncDetalle = 'Descargando formas de pago...';
+      });
+      final formasPago = await apiService.obtenerFormasPago();
+      await db.insertarFormasPagoLote(formasPago.cast<Map<String, dynamic>>());
       // --- 5. Direcciones ---
       setState(() {
         _syncStatus = 'Direcciones...';
         _syncProgress = 0.45;
         _syncDetalle = 'Descargando direcciones de clientes...';
       });
-      _addLog('📥 Descargando direcciones...');
       final direcciones = await apiService.obtenerDirecciones();
       await db.limpiarDirecciones();
       await db.insertarDireccionesLote(
         direcciones.cast<Map<String, dynamic>>(),
       );
-      _addLog('✅ ${direcciones.length} direcciones guardadas');
 
       // --- 6. Datos Maestros CRM ---
       setState(() {
@@ -310,8 +307,6 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _syncProgress = 0.50;
         _syncDetalle = 'Descargando configuración CRM...';
       });
-
-      _addLog('📥 Tipos visita, provincias, zonas...');
 
       final tiposVisita = await apiService.obtenerTiposVisita();
       await db.limpiarTiposVisita();
@@ -337,8 +332,6 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       await db.limpiarCampanas();
       await db.insertarCampanasLote(campanas.cast<Map<String, dynamic>>());
 
-      _addLog('✅ Maestros CRM actualizados');
-
       // --- 7. Datos Transaccionales (Leads, Agenda, Pedidos, Presupuestos) ---
       setState(() {
         _syncStatus = 'Datos Usuario...';
@@ -350,23 +343,19 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       final leads = await apiService.obtenerLeads();
       await db.limpiarLeads();
       await db.insertarLeadsLote(leads.cast<Map<String, dynamic>>());
-      _addLog('✅ ${leads.length} leads descargados');
 
       // Agenda (filtrada por comercial actual si existe)
       final prefs = await SharedPreferences.getInstance();
       final comercialId = prefs.getInt('comercial_id');
 
-      _addLog('📥 Descargando agenda...');
       final agenda = await apiService.obtenerAgenda(comercialId);
       await db.limpiarAgenda();
       await db.insertarAgendasLote(agenda.cast<Map<String, dynamic>>());
-      _addLog('✅ ${agenda.length} visitas en agenda');
 
       // Pedidos
       setState(() {
         _syncDetalle = 'Descargando pedidos...';
       });
-      _addLog('📥 Descargando pedidos...');
       final pedidos = await apiService.obtenerPedidos();
       await db.limpiarPedidos();
       await db.insertarPedidosLote(pedidos.cast<Map<String, dynamic>>());
@@ -375,7 +364,6 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       await db.insertarLineasPedidoLote(
         lineasPedido.cast<Map<String, dynamic>>(),
       );
-      _addLog('✅ ${pedidos.length} pedidos con ${lineasPedido.length} líneas');
 
       // Presupuestos
       setState(() {
@@ -393,16 +381,13 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       await db.insertarLineasPresupuestoLote(
         lineasPresu.cast<Map<String, dynamic>>(),
       );
-      _addLog(
-        '✅ ${presupuestos.length} presupuestos con ${lineasPresu.length} líneas',
-      );
 
       // --- 8. Tarifas ---
       setState(() {
         _syncProgress = 0.90;
         _syncDetalle = 'Descargando tarifas...';
       });
-      _addLog('📥 Descargando tarifas...');
+
       final tarifasCli = await apiService.obtenerTarifasCliente();
       await db.limpiarTarifasCliente();
       await db.insertarTarifasClienteLote(
@@ -414,7 +399,33 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       await db.insertarTarifasArticuloLote(
         tarifasArt.cast<Map<String, dynamic>>(),
       );
-      _addLog('✅ Tarifas actualizadas');
+
+      setState(() {
+        _syncStatus = 'Movimientos...';
+        _syncProgress = 0.92;
+        _syncDetalle = 'Descargando histórico de movimientos...';
+      });
+
+      // Nota: Esto puede tardar si hay muchos datos.
+      // Podrías limitar la descarga por fecha en el futuro.
+      final movimientosLista = await apiService.obtenerMovimientos();
+
+      await db.limpiarMovimientos(); // Borrar anteriores para recarga limpia
+
+      // Insertar en lotes de 500 para no bloquear la UI
+      const batchSizeMov = 500;
+      for (var i = 0; i < movimientosLista.length; i += batchSizeMov) {
+        final end = (i + batchSizeMov < movimientosLista.length)
+            ? i + batchSizeMov
+            : movimientosLista.length;
+        await db.insertarMovimientosLote(
+          movimientosLista.sublist(i, end).cast<Map<String, dynamic>>(),
+        );
+        setState(() {
+          _syncDetalle =
+              'Guardando movimientos ${i + 1}-$end de ${movimientosLista.length}...';
+        });
+      }
 
       // --- 9. Configuración de IVA ---
       setState(() {
@@ -423,7 +434,6 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _syncDetalle = 'Descargando configuración de impuestos...';
       });
 
-      _addLog('📥 Descargando IVA desde API...');
       final configIva = await apiService.obtenerConfiguracionIVA();
 
       if (configIva.isNotEmpty) {
@@ -435,9 +445,9 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         );
         await prefs.setDouble('iva_exento', configIva['iva_exento']!);
 
-        _addLog('✅ IVA actualizado: G=${configIva['iva_general']}%');
+        //_addLog('✅ IVA actualizado: G=${configIva['iva_general']}%');
       } else {
-        _addLog('⚠️ No se pudo descargar IVA, usando valores por defecto');
+        //  _addLog('⚠️ No se pudo descargar IVA, usando valores por defecto');
       }
 
       // --- 10. Finalizar ---
@@ -453,7 +463,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         _isSyncing = false;
       });
 
-      _addLog('🎉 Sincronización finalizada con éxito');
+      //_addLog('🎉 Sincronización finalizada con éxito');
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -464,7 +474,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
         ),
       );
     } catch (e) {
-      _addLog('❌ ERROR CRÍTICO: $e');
+      //_addLog('❌ ERROR CRÍTICO: $e');
       setState(() {
         _isSyncing = false;
         _syncStatus = 'Error';
@@ -512,7 +522,6 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       );
     }
   }
-  // Añadir después del método _sincronizarDatos() en lib/screens/configuracion_screen.dart
 
   Future<void> _sincronizacionIncremental() async {
     if (_urlController.text.isEmpty || _apiKeyController.text.isEmpty) {
@@ -904,7 +913,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          TextField(
+          /*TextField(
             controller: _diasVisitaController,
             decoration: const InputDecoration(
               labelText: 'Días por defecto próxima visita',
@@ -912,7 +921,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
               prefixIcon: Icon(Icons.calendar_today_outlined),
             ),
             keyboardType: TextInputType.number,
-          ),
+          ),*/
           const SizedBox(height: 16),
           ElevatedButton.icon(
             onPressed: _guardarConfiguracion,
@@ -982,18 +991,18 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                     ),
                     if (_syncDetalle.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Text(
-                        _syncDetalle,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                      ),
+                      //Text(
+                      // _syncDetalle,
+                      //textAlign: TextAlign.center,
+                      //style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                      //),
                     ],
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            Card(
+            /* Card(
               child: Container(
                 height: 300,
                 padding: const EdgeInsets.all(12),
@@ -1042,7 +1051,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                   ],
                 ),
               ),
-            ),
+            ),*/
           ] else
             ElevatedButton.icon(
               onPressed: _sincronizarDatos,
@@ -1054,7 +1063,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
             ),
 
           const SizedBox(height: 12),
-          ElevatedButton.icon(
+          /* ElevatedButton.icon(
             onPressed: _isSyncing ? null : _sincronizacionIncremental,
             icon: const Icon(Icons.update),
             label: const Text('Actualización Rápida (Solo Cambios)'),
@@ -1063,7 +1072,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
               backgroundColor: const Color(0xFF4CAF50),
               foregroundColor: Colors.white,
             ),
-          ),
+          ) 
           const SizedBox(height: 32),
           const Divider(),
           const SizedBox(height: 16),
@@ -1103,7 +1112,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
               padding: const EdgeInsets.all(16),
               backgroundColor: const Color(0xFFF44336),
             ),
-          ),
+          ),*/
         ],
       ),
     );
